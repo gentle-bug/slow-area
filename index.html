@@ -192,6 +192,55 @@
     #time-meter.freeze #time-fill { background: #9df3ff; box-shadow: 0 0 10px rgba(140, 240, 255, 0.9); }
     #time-meter.freeze .tm-label { color: #9df3ff; opacity: 1; }
 
+    @keyframes freezePulse {
+      0%, 100% { opacity: 1; text-shadow: 0 0 12px rgba(110, 231, 255, 0.95); }
+      50% { opacity: 0.3; text-shadow: none; }
+    }
+    #freeze.ready {
+      color: #9df3ff;
+      animation: freezePulse 0.9s ease-in-out infinite;
+    }
+
+    #pickup-prompt {
+      position: absolute;
+      left: 50%;
+      top: calc(50% + 58px);
+      transform: translateX(-50%);
+      display: none;
+      padding: 6px 14px;
+      font-size: 14px;
+      letter-spacing: 0.5px;
+      color: var(--text);
+      background: rgba(12, 18, 28, 0.6);
+      border: 1px solid rgba(110, 231, 255, 0.4);
+      border-radius: 6px;
+      text-shadow: 0 1px 5px rgba(0, 0, 0, 0.9);
+      white-space: nowrap;
+    }
+    #pickup-prompt .pp-key {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    #freeze-banner {
+      position: absolute;
+      left: 50%;
+      top: calc(50% - 215px);
+      transform: translateX(-50%);
+      display: none;
+      padding: 7px 18px;
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      color: #9df3ff;
+      background: rgba(12, 22, 34, 0.55);
+      border: 1px solid rgba(140, 240, 255, 0.55);
+      border-radius: 8px;
+      text-shadow: 0 0 12px rgba(120, 235, 255, 0.8);
+      white-space: nowrap;
+      animation: freezePulse 0.9s ease-in-out infinite;
+    }
+
     #hint {
       position: absolute;
       bottom: 14px;
@@ -304,6 +353,8 @@
       <div class="tm-label">Time <span id="timescale">1.00</span>×</div>
       <div id="time-bar"><div id="time-fill"></div></div>
     </div>
+    <div id="pickup-prompt"></div>
+    <div id="freeze-banner">FREEZE SẴN SÀNG · Bấm [F]</div>
     <div id="hint">WASD di chuyển • Chuột phải ngắm (sniper) • Click bắn • Shift dash • F đóng băng thời gian • E nhặt súng • ESC tạm dừng • F5 để chơi lại</div>
   </div>
 
@@ -331,6 +382,7 @@
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
     import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
     import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+    import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
     // === AUDIO SYSTEM (Web Audio API - procedural gunshot sounds) ===
     let audioCtx = null;
     let audioMaster = null;
@@ -557,7 +609,7 @@
     const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth / window.innerHeight, 0.1, 2880);
     camera.position.set(0, 1.7, 9);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({ antialias: false, stencil: false, powerPreference: 'high-performance' });
     renderer.setPixelRatio(1);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.45;
@@ -721,6 +773,10 @@
     const armorFillEl = document.getElementById("armor-fill");
     const timeFillEl = document.getElementById("time-fill");
     const timeMeterEl = document.getElementById("time-meter");
+    const pickupPromptEl = document.getElementById("pickup-prompt");
+    const freezeBannerEl = document.getElementById("freeze-banner");
+    let _lastPromptWeapon = null;
+    let _lastFreezeReady = false;
     let hitMarkerTimer = 0;
 
     function showHitMarker(kill) {
@@ -1427,21 +1483,33 @@
       }
     }
 
+    // Returns a reused array (never iterate with for..of — index it).
+    // Dedup via per-query epoch mark on the obstacle instead of a Set,
+    // so queries allocate nothing. Obstacles register into every cell they
+    // touch, so a span of ceil(extra/cell) is sufficient (was +1 extra ring).
     function getObsNearby(x, z, extra) {
       const gx = obsGridCoord(x);
       const gz = obsGridCoord(z);
-      const span = Math.ceil(extra / OBS_GRID_CELL) + 1;
-      const result = _obsNearbySet;
-      result.clear();
+      const span = Math.max(1, Math.ceil(extra / OBS_GRID_CELL));
+      const result = _obsNearbyList;
+      result.length = 0;
+      _obsQueryId++;
       for (let dx = -span; dx <= span; dx++) {
         for (let dz = -span; dz <= span; dz++) {
           const arr = obsGrid.get(obsGridKey(gx + dx, gz + dz));
-          if (arr) for (let k = 0; k < arr.length; k++) result.add(arr[k]);
+          if (arr) {
+            for (let k = 0; k < arr.length; k++) {
+              const idx = arr[k];
+              const o = obstacles[idx];
+              if (o && o._q !== _obsQueryId) { o._q = _obsQueryId; result.push(idx); }
+            }
+          }
         }
       }
       return result;
     }
-    const _obsNearbySet = new Set();
+    const _obsNearbyList = [];
+    let _obsQueryId = 0;
 
     const MAX_BULLET_HOLES = 40;
     const fragments = [];
@@ -2520,8 +2588,8 @@
 
     function isPositionBlockedByObstacle(position, padding = 0) {
       const nearby = getObsNearby(position.x, position.z, padding);
-      for (const i of nearby) {
-        const obs = obstacles[i];
+      for (let n = 0; n < nearby.length; n++) {
+        const obs = obstacles[nearby[n]];
         if (!obs) continue;
         const dx = position.x - obs.mesh.position.x;
         const dz = position.z - obs.mesh.position.z;
@@ -2544,8 +2612,8 @@
 
     function resolvePositionAgainstObstacles(position, radius) {
       const nearby = getObsNearby(position.x, position.z, radius + 12);
-      for (const i of nearby) {
-        const obs = obstacles[i];
+      for (let n = 0; n < nearby.length; n++) {
+        const obs = obstacles[nearby[n]];
         if (!obs) continue;
         const dx = position.x - obs.mesh.position.x;
         const dz = position.z - obs.mesh.position.z;
@@ -2668,7 +2736,8 @@
             radius: scaledR,
             height: obs.height * scaleFactor,
             hp: Math.ceil(obs.hp * (0.8 + scaleFactor * 0.4)),
-            primaryColor: obs.primaryColor
+            primaryColor: obs.primaryColor,
+            _q: 0
           });
           placed = true;
           break;
@@ -2713,7 +2782,8 @@
             height: obs.height * scaleFactor,
             hp: Infinity,
             indestructible: true,
-            primaryColor: obs.primaryColor
+            primaryColor: obs.primaryColor,
+            _q: 0
           });
           placed = true;
           break;
@@ -2733,6 +2803,7 @@
       enemy.rightFore.getWorldQuaternion(tempQuat2);
       tempQuat2.invert();
       enemy.gunMount.quaternion.copy(tempQuat2.multiply(tempQuat1));
+      enemy.gunMount.updateMatrix();
     }
 
     const _oiPoint = new THREE.Vector3();
@@ -2741,7 +2812,8 @@
     const _oiResult = { point: _oiPoint, normal: _oiNormal, obsIndex: -1 };
     function getObstacleImpact(position) {
       const nearby = getObsNearby(position.x, position.z, 1);
-      for (const i of nearby) {
+      for (let n = 0; n < nearby.length; n++) {
+        const i = nearby[n];
         const obs = obstacles[i];
         if (!obs) continue;
         const obsBottom = obs.mesh.position.y;
@@ -2844,18 +2916,21 @@
     muzzleLight.position.set(0, -100, 0);
     scene.add(muzzleLight);
 
+    const _expFireCfg = {
+      colors: gpuFireColors, spdMin: 3, spdMax: 8, elevBias: 0.3, upBias: 4,
+      sizeMin: 18, sizeMax: 45, lifeMin: 0.4, lifeMax: 1.0, alpha: 0.9,
+      gravity: 3, drag: 0.96, spread: 0.5
+    };
+    const _expSmokeCfg = {
+      colors: gpuSmokeColors, spdMin: 1.5, spdMax: 4, elevBias: 0.3, upBias: 3,
+      sizeMin: 30, sizeMax: 60, lifeMin: 0.6, lifeMax: 1.2, alpha: 0.45,
+      gravity: 1, drag: 0.94, spread: 0.3
+    };
+
     function spawnExplosion(point, radius) {
       // GPU particles for fire + smoke (no sprite allocation)
-      emitGpu(point, 18, {
-        colors: gpuFireColors, spdMin: 3, spdMax: 8, elevBias: 0.3, upBias: 4,
-        sizeMin: 18, sizeMax: 45, lifeMin: 0.4, lifeMax: 1.0, alpha: 0.9,
-        gravity: 3, drag: 0.96, spread: 0.5
-      });
-      emitGpu(point, 10, {
-        colors: gpuSmokeColors, spdMin: 1.5, spdMax: 4, elevBias: 0.3, upBias: 3,
-        sizeMin: 30, sizeMax: 60, lifeMin: 0.6, lifeMax: 1.2, alpha: 0.45,
-        gravity: 1, drag: 0.94, spread: 0.3
-      });
+      emitGpu(point, 18, _expFireCfg);
+      emitGpu(point, 10, _expSmokeCfg);
       // Slow rolling smoke column (normal-blended, lingers and expands)
       for (let i = 0; i < 10; i++) {
         emitSmkAt(
@@ -3095,10 +3170,41 @@
       };
       const build = builders[weapon.id] || buildM4Rifle;
       const group = build(weapon);
+      const merged = mergeWeaponGroup(group);
       const lengthScale = 0.95 + (weapon.scaleY || 1) * 0.22;
       const widthScale = 0.9 + (weapon.scaleR || 1) * 0.18;
-      group.scale.set(widthScale, widthScale, lengthScale);
-      return group;
+      merged.scale.set(widthScale, widthScale, lengthScale);
+      return merged;
+    }
+
+    // Merge all builder parts sharing a material into a single mesh each:
+    // a gun drops from ~15 draw calls to ~5-6 with zero visual change. Safe
+    // because gun parts never move relative to each other.
+    const _mergeInv = new THREE.Matrix4();
+    const _mergeRel = new THREE.Matrix4();
+    function mergeWeaponGroup(root) {
+      root.updateMatrixWorld(true);
+      _mergeInv.copy(root.matrixWorld).invert();
+      const byMat = new Map();
+      root.traverse((o) => {
+        if (!o.isMesh) return;
+        const g = o.geometry.clone();
+        _mergeRel.multiplyMatrices(_mergeInv, o.matrixWorld);
+        g.applyMatrix4(_mergeRel);
+        let arr = byMat.get(o.material);
+        if (!arr) { arr = []; byMat.set(o.material, arr); }
+        arr.push(g);
+        o.geometry.dispose();
+      });
+      const out = new THREE.Group();
+      out.position.copy(root.position);
+      out.quaternion.copy(root.quaternion);
+      for (const [mat, geos] of byMat) {
+        const mergedGeo = mergeGeometries(geos, false);
+        for (let i = 0; i < geos.length; i++) geos[i].dispose();
+        out.add(new THREE.Mesh(mergedGeo, mat));
+      }
+      return out;
     }
 
     // === M4 Carbine / AR-15 ===
@@ -3815,6 +3921,14 @@
         enemy.leftArm.rotation.set(-0.32 - sway * 0.28, 0.15, -0.1);
         enemy.leftFore.rotation.set(-0.2, 0.03, -0.02);
       }
+
+      // Rig is matrix-frozen — push the new poses manually
+      enemy.rightLeg.updateMatrix();
+      enemy.leftLeg.updateMatrix();
+      enemy.rightArm.updateMatrix();
+      enemy.rightFore.updateMatrix();
+      enemy.leftArm.updateMatrix();
+      enemy.leftFore.updateMatrix();
     }
 
     function clearDroppedWeapons() {
@@ -3845,7 +3959,7 @@
         vel: new THREE.Vector3((Math.random() - 0.5) * 1.5, 2 + Math.random(), (Math.random() - 0.5) * 1.5),
         spin: 2.5 + Math.random() * 2,
         time: 0,
-        pickupRadius: 3.0
+        pickupRadius: 4.5
       });
 
       if (droppedWeapons.length > 15) {
@@ -4180,6 +4294,7 @@
         fx.mesh.rotation.y += dt * (1.9 + t * 1.4);
         const scale = 1 - t * 0.24;
         fx.mesh.scale.set(fx.baseScale.x * scale, fx.baseScale.y * scale, fx.baseScale.z * scale);
+        fx.mesh.updateMatrix(); // enemy roots are matrix-frozen
 
         for (let m = 0; m < fx.materials.length; m++) {
           fx.materials[m].opacity = fade;
@@ -4443,6 +4558,10 @@
       mesh.position.copy(spawnPos);
 
       scene.add(mesh);
+      // Matrix-freeze the whole rig (~35 nodes): only the handful of nodes we
+      // actually animate get manual updateMatrix() calls — root every frame it
+      // moves/turns, limbs in updateEnemyRig, gunMount in updateEnemyAimRig.
+      mesh.traverse((o) => { o.updateMatrix(); o.matrixAutoUpdate = false; });
       enemies.push({
         id: nextEnemyId++,
         mesh,
@@ -4533,6 +4652,28 @@
     const instTempPos = new THREE.Vector3();
     const instTempQuat = new THREE.Quaternion();
 
+    // Longitudinal groove strips on the bullet body: 3 thin bright ridges so
+    // the eye can actually track the bullet spinning about its own axis
+    // (a smooth cylinder rotating around its symmetry axis looks static).
+    const grooveMat = new THREE.MeshStandardMaterial({
+      color: 0xfff0d0, metalness: 0.6, roughness: 0.35,
+      emissive: 0xffe8c0, emissiveIntensity: 0.07
+    });
+    function makeGrooveGeo(shape) {
+      const parts = [];
+      const gw = Math.max(0.002, shape.bodyR1 * 0.055);
+      const gh = shape.bodyH * 0.95;
+      for (let i = 0; i < 3; i++) {
+        const g = new THREE.BoxGeometry(gw, gh, gw);
+        g.translate(shape.bodyR1 * 0.98, 0, 0);
+        g.rotateY(i * Math.PI * 2 / 3);
+        parts.push(g);
+      }
+      const merged = mergeGeometries(parts, false);
+      for (let i = 0; i < parts.length; i++) parts[i].dispose();
+      return merged;
+    }
+
     // Flying bullets render only tip + body — a real projectile leaves its case
     // behind at the gun. The casing InstancedMesh is reused for ejected shells.
     for (const wid of Object.keys(BULLET_SHAPES)) {
@@ -4541,9 +4682,10 @@
       const bi = {
         tip: new THREE.InstancedMesh(geos.tip, mats.tip, MAX_BULLET_INST),
         body: new THREE.InstancedMesh(geos.body, mats.body, MAX_BULLET_INST),
+        groove: new THREE.InstancedMesh(makeGrooveGeo(BULLET_SHAPES[wid]), grooveMat, MAX_BULLET_INST),
         casing: new THREE.InstancedMesh(geos.casing, mats.casing, MAX_BULLET_INST)
       };
-      for (const key of ['tip', 'body', 'casing']) {
+      for (const key of ['tip', 'body', 'groove', 'casing']) {
         bi[key].count = 0;
         bi[key].frustumCulled = false;
         scene.add(bi[key]);
@@ -4643,12 +4785,13 @@
         const off = bulletPartOffsets[wid];
         instTempScale.set(off.sx, off.sy, off.sz);
 
-        // Body
+        // Body (+ groove strips share the exact same transform)
         instTempPos.set(0, off.bodyY, 0).applyQuaternion(b.bQuat);
         instTempPos.x *= off.sz; instTempPos.y *= off.sz; instTempPos.z *= off.sz;
         instTempPos.add(b.bPos);
         instTempMat.compose(instTempPos, b.bQuat, instTempScale);
         bi.body.setMatrixAt(idx, instTempMat);
+        bi.groove.setMatrixAt(idx, instTempMat);
 
         // Tip
         instTempPos.set(0, off.tipY, 0).applyQuaternion(b.bQuat);
@@ -4679,10 +4822,11 @@
         const bi = bulletInstData[wid];
         const c = bulletInstCounters[wid] || 0;
         const sc = shellInstCounters[wid] || 0;
-        bi.tip.count = c; bi.body.count = c; bi.casing.count = sc;
+        bi.tip.count = c; bi.body.count = c; bi.groove.count = c; bi.casing.count = sc;
         if (c > 0) {
           bi.tip.instanceMatrix.needsUpdate = true;
           bi.body.instanceMatrix.needsUpdate = true;
+          bi.groove.instanceMatrix.needsUpdate = true;
         }
         if (sc > 0) bi.casing.instanceMatrix.needsUpdate = true;
       }
@@ -4837,6 +4981,7 @@
     }
     function updateRibbonsFromSpine(sp, corePos, outerPos, coreWidth, outerWidth) {
       const camPos = camera.position;
+      const invSeg = 1 / (TRAIL_SEGMENTS - 1);
       for (let si = 0; si < TRAIL_SEGMENTS; si++) {
         const si3 = si * 3;
         const cx = sp[si3], cy = sp[si3 + 1], cz = sp[si3 + 2];
@@ -4850,7 +4995,8 @@
         let rx = fwy * tcz - fwz * tcy, ry = fwz * tcx - fwx * tcz, rz = fwx * tcy - fwy * tcx;
         const len = Math.sqrt(rx * rx + ry * ry + rz * rz);
         if (len > 0.0001) { rx /= len; ry /= len; rz /= len; }
-        const taper = 1 - si / (TRAIL_SEGMENTS - 1) * 0.92;
+
+        const taper = 1 - si * invSeg * 0.92;
         const wC = coreWidth * taper, wO = outerWidth * taper;
         const vi = si * 6;
         corePos[vi] = cx + rx * wC; corePos[vi + 1] = cy + ry * wC; corePos[vi + 2] = cz + rz * wC;
@@ -4913,15 +5059,15 @@
         }
         // Hot white-ish core, weapon-tinted halo
         trail.coreMat.uniforms.color.value.setHex(0xfff3dd);
-        trail.coreMat.uniforms.baseOpacity.value = 0.26;
+        trail.coreMat.uniforms.baseOpacity.value = 0.105;
         trail.outerMat.uniforms.color.value.setHex(weapon.ringColor || 0xd0cdc6);
-        trail.outerMat.uniforms.baseOpacity.value = 0.07;
+        trail.outerMat.uniforms.baseOpacity.value = 0.035;
         scene.add(trail.coreMesh);
         scene.add(trail.outerMesh);
 
         const gravityScale = THREE.MathUtils.clamp(distanceHint / 24, 0.25, 1.45);
         const power = THREE.MathUtils.clamp(weapon.power ?? 0.6, 0.2, 1);
-        const gravity = (weapon.gravityBase ?? 3.6) * gravityScale * (1.35 - power) * 0.8;
+        const gravity = (weapon.gravityBase ?? 3.6) * gravityScale * (1.35 - power) * 0.62;
         const b = _allocBullet();
         b.bPos.copy(from);
         b.bQuat.setFromUnitVectors(BULLET_AXIS, _shootDir);
@@ -5008,12 +5154,15 @@
       if (freezeActive) {
         freezeEl.textContent = `ACTIVE ${freezeTimer.toFixed(1)}s`;
         freezeEl.style.color = "#9fe8ff";
+        freezeEl.classList.remove("ready");
       } else if (freezeCharge > 0) {
         freezeEl.textContent = `Ready x${freezeCharge} (F)`;
-        freezeEl.style.color = "#6ee7ff";
+        freezeEl.style.color = "";
+        freezeEl.classList.add("ready");
       } else {
         freezeEl.textContent = `${freezeProgress}/${FREEZE_KILLS_REQUIRED}`;
         freezeEl.style.color = "#ffd39f";
+        freezeEl.classList.remove("ready");
       }
 
       weaponEl.textContent = playerWeapon ? playerWeapon.name : "Rifle";
@@ -5253,6 +5402,7 @@
           updateEnemyRig(e, gdt, moving);
           updateEnemyAimRig(e, playerPos);
         }
+        if (moving || fullUpdate) e.mesh.updateMatrix();
         e.shootCd -= gdt;
         e.recoverCd = Math.max(0, (e.recoverCd || 0) - gdt);
 
@@ -5351,14 +5501,28 @@
         if (speedNow > 0.0001) {
           tempVec3.copy(b.vel).multiplyScalar(1 / speedNow);
           tempQuat1.setFromUnitVectors(BULLET_AXIS, tempVec3);
-          tempQuat2.setFromAxisAngle(BULLET_AXIS, b.spinPhase);
+          // The spin itself is made visible by the groove strips instanced
+          // onto the bullet body (a symmetric body rotating about its own
+          // axis shows nothing) — the bullet stays perfectly straight.
+          tempQuat2.setFromAxisAngle(BULLET_AXIS, b.spinPhase * 4.4);
           b.bQuat.copy(tempQuat1).multiply(tempQuat2);
         }
         b.ringAngle += bulletDt * 16;
 
         const p = b.bPos;
         const sp = b.trail.spinePos;
-        sp.copyWithin(3, 0, sp.length - 3);
+
+        // Distance-based spine: push one history slot per fixed distance
+        // travelled (not per frame), so the tail keeps its full length in
+        // slow motion instead of collapsing into a stub.
+        const segLen = Math.max(0.3, b.trailSpacing * 0.8);
+        b.trailTimer += speedNow * bulletDt;
+        if (b.trailTimer >= segLen) {
+          let pushes = (b.trailTimer / segLen) | 0;
+          b.trailTimer -= pushes * segLen;
+          if (pushes > 4) pushes = 4;
+          for (let k = 0; k < pushes; k++) sp.copyWithin(3, 0, sp.length - 3);
+        }
 
         const speedInv = 1 / Math.max(0.0001, speedNow);
         const fx = b.vel.x * speedInv;
@@ -5372,27 +5536,12 @@
 
         const distToCam = p.distanceTo(camera.position);
         if (distToCam < 70) {
-          updateRibbonsFromSpine(sp, b.trail.corePos, b.trail.outerPos, 0.025, 0.09);
+          updateRibbonsFromSpine(sp, b.trail.corePos, b.trail.outerPos, 0.0125, 0.065);
           b.trail.coreMesh.geometry.attributes.position.needsUpdate = true;
           b.trail.outerMesh.geometry.attributes.position.needsUpdate = true;
         }
         b.trail.coreMesh.visible = distToCam < 70;
         b.trail.outerMesh.visible = distToCam < 70;
-
-        // Vapor wake: faint smoke puffs left hanging in the air behind nearby
-        // bullets — the classic slow-motion footage look. Pre-allocated pool.
-        if (distToCam < 45 && smkCount < SMK_MAX - 2) {
-          b.vaporAcc += speedNow * bulletDt;
-          const spacing = 1.0 + b.trailSpacing;
-          if (b.vaporAcc >= spacing) {
-            b.vaporAcc -= spacing;
-            emitSmkAt(
-              p.x, p.y, p.z,
-              (Math.random() - 0.5) * 0.3, 0.1 + Math.random() * 0.18, (Math.random() - 0.5) * 0.3,
-              0.5 + Math.random() * 0.4, 0.13, 0.65 + Math.random() * 0.5
-            );
-          }
-        }
 
         const surfaceImpact = getArenaImpact(p);
         const obstacleImpact = surfaceImpact ? null : getObstacleImpact(p);
@@ -5717,6 +5866,36 @@
       if (hitMarkerTimer > 0) {
         hitMarkerTimer -= dt;
         if (hitMarkerTimer <= 0) hitmarkerEl.style.opacity = "0";
+      }
+
+      // Pickup prompt: nearest dropped weapon within pickup range
+      let promptWeapon = null;
+      if (!gameOver && document.pointerLockElement) {
+        let bestD = Infinity;
+        for (let i = 0; i < droppedWeapons.length; i++) {
+          const d = droppedWeapons[i];
+          const wDist = d.mesh.position.distanceTo(camera.position);
+          if (wDist < d.pickupRadius && wDist < bestD) {
+            bestD = wDist;
+            promptWeapon = getWeaponById(d.weaponId);
+          }
+        }
+      }
+      if (promptWeapon !== _lastPromptWeapon) {
+        _lastPromptWeapon = promptWeapon;
+        if (promptWeapon) {
+          pickupPromptEl.innerHTML = `${promptWeapon.name} · <span class="pp-key">[E]</span> Nhặt súng`;
+          pickupPromptEl.style.display = "block";
+        } else {
+          pickupPromptEl.style.display = "none";
+        }
+      }
+
+      // Center-screen freeze-ready banner
+      const freezeReady = !gameOver && freezeCharge > 0 && !freezeActive;
+      if (freezeReady !== _lastFreezeReady) {
+        _lastFreezeReady = freezeReady;
+        freezeBannerEl.style.display = freezeReady ? "block" : "none";
       }
 
       const tsT = THREE.MathUtils.clamp((timeScale - 0.038) / (1 - 0.038), 0, 1);
