@@ -34,12 +34,58 @@
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 20px;
-      height: 20px;
-      margin-left: -10px;
-      margin-top: -10px;
+      width: 28px;
+      height: 28px;
+      margin-left: -14px;
+      margin-top: -14px;
       opacity: 0.95;
+      will-change: transform;
     }
+
+    #crosshair .ch-line {
+      position: absolute;
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent);
+    }
+    #crosshair .ch-t { left: 50%; top: 0; width: 2px; height: 8px; margin-left: -1px; }
+    #crosshair .ch-b { left: 50%; bottom: 0; width: 2px; height: 8px; margin-left: -1px; }
+    #crosshair .ch-l { left: 0; top: 50%; width: 8px; height: 2px; margin-top: -1px; }
+    #crosshair .ch-r { right: 0; top: 50%; width: 8px; height: 2px; margin-top: -1px; }
+    #crosshair .ch-dot {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 3px;
+      height: 3px;
+      margin: -1.5px 0 0 -1.5px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 5px var(--accent);
+    }
+
+    #hitmarker {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 26px;
+      height: 26px;
+      margin: -13px 0 0 -13px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 70ms linear;
+    }
+    #hitmarker span {
+      position: absolute;
+      width: 10px;
+      height: 2px;
+      background: #fff;
+      box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+    }
+    #hitmarker .hm-tl { left: 0; top: 4px; transform: rotate(45deg); }
+    #hitmarker .hm-tr { right: 0; top: 4px; transform: rotate(-45deg); }
+    #hitmarker .hm-bl { left: 0; bottom: 4px; transform: rotate(-45deg); }
+    #hitmarker .hm-br { right: 0; bottom: 4px; transform: rotate(45deg); }
+    #hitmarker.kill span { background: #ff5d5d; box-shadow: 0 0 7px rgba(255, 70, 70, 0.95); }
 
     #scope-overlay {
       position: fixed;
@@ -76,37 +122,75 @@
         linear-gradient(90deg, rgba(214, 237, 255, 0.62), rgba(214, 237, 255, 0.62)) center / 100% 1px no-repeat;
     }
 
-    #crosshair::before,
-    #crosshair::after {
-      content: "";
-      position: absolute;
-      background: var(--accent);
-      box-shadow: 0 0 8px var(--accent);
-    }
-
-    #crosshair::before {
-      left: 9px;
-      top: 0;
-      width: 2px;
-      height: 20px;
-    }
-
-    #crosshair::after {
-      left: 0;
-      top: 9px;
-      width: 20px;
-      height: 2px;
-    }
-
     #stats {
       position: absolute;
-      left: 14px;
-      top: 12px;
-      font-size: 14px;
-      letter-spacing: 0.5px;
-      line-height: 1.45;
-      text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+      left: 16px;
+      top: 16px;
+      font-size: 13px;
+      letter-spacing: 0.4px;
+      line-height: 1.5;
+      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+      background: linear-gradient(180deg, rgba(12, 18, 28, 0.42), rgba(10, 14, 22, 0.28));
+      border-left: 2px solid rgba(110, 231, 255, 0.55);
+      border-radius: 0 8px 8px 0;
+      padding: 10px 14px 8px 12px;
     }
+
+    .srow { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+    .slabel {
+      width: 42px;
+      font-size: 10px;
+      letter-spacing: 1.6px;
+      text-transform: uppercase;
+      opacity: 0.7;
+    }
+    .sbar {
+      width: 132px;
+      height: 9px;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(110, 231, 255, 0.22);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .sfill { height: 100%; width: 100%; transition: width 0.18s ease; }
+    #hp-fill { background: linear-gradient(90deg, #2eff8b, #8dffc2); box-shadow: 0 0 8px rgba(46, 255, 139, 0.5); }
+    #hp-fill.low { background: linear-gradient(90deg, #ff4d4d, #ff9a6b); box-shadow: 0 0 8px rgba(255, 77, 77, 0.6); }
+    #armor-fill { background: linear-gradient(90deg, #3f9dff, #9bd4ff); box-shadow: 0 0 8px rgba(63, 157, 255, 0.5); }
+    .sline { margin: 2px 0; opacity: 0.92; }
+    .sval { color: var(--accent); font-weight: 600; }
+
+    #time-meter {
+      position: absolute;
+      bottom: 56px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 210px;
+      text-align: center;
+      text-shadow: 0 1px 5px rgba(0, 0, 0, 0.9);
+    }
+    #time-meter .tm-label {
+      font-size: 10px;
+      letter-spacing: 2.5px;
+      opacity: 0.65;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+    #time-bar {
+      height: 5px;
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(110, 231, 255, 0.28);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #time-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #4fc3ff, #ffd479);
+      transform-origin: left center;
+      will-change: transform;
+    }
+    #time-meter.freeze #time-fill { background: #9df3ff; box-shadow: 0 0 10px rgba(140, 240, 255, 0.9); }
+    #time-meter.freeze .tm-label { color: #9df3ff; opacity: 1; }
 
     #hint {
       position: absolute;
@@ -198,19 +282,29 @@
   <div id="hit-left" class="hit-indicator"></div>
   <div id="hit-right" class="hit-indicator"></div>
   <div id="hud">
-    <div id="crosshair"></div>
+    <div id="crosshair">
+      <span class="ch-line ch-t"></span><span class="ch-line ch-b"></span>
+      <span class="ch-line ch-l"></span><span class="ch-line ch-r"></span>
+      <span class="ch-dot"></span>
+    </div>
+    <div id="hitmarker">
+      <span class="hm-tl"></span><span class="hm-tr"></span>
+      <span class="hm-bl"></span><span class="hm-br"></span>
+    </div>
     <div id="scope-overlay"><div class="scope-lines"></div></div>
     <div id="stats">
-      HP: <span id="hp">100</span> | Armor: <span id="armor">0</span><br>
-      Kills: <span id="kills">0</span><br>
-      Time Scale: <span id="timescale">1.00</span>x<br>
-      Dash: <span id="dash">Ready</span><br>
-      Freeze: <span id="freeze">0/5</span><br>
-      Weapon: <span id="weapon">Sniper</span><br>
-      Enemies Left: <span id="enemies-left">0</span><br>
-      Boss: <span id="boss-hp"></span>
+      <div class="srow"><span class="slabel">HP</span><div class="sbar"><div id="hp-fill" class="sfill"></div></div><span id="hp" class="sval">100</span></div>
+      <div class="srow"><span class="slabel">Giáp</span><div class="sbar"><div id="armor-fill" class="sfill"></div></div><span id="armor" class="sval">0</span></div>
+      <div class="sline">Hạ gục: <span id="kills" class="sval">0</span> · Còn lại: <span id="enemies-left" class="sval">0</span></div>
+      <div class="sline">Súng: <span id="weapon" class="sval">Sniper</span></div>
+      <div class="sline">Dash: <span id="dash" class="sval">Ready</span> · Freeze: <span id="freeze" class="sval">0/5</span></div>
+      <div class="sline">Boss: <span id="boss-hp" class="sval"></span></div>
     </div>
-    <div id="hint">WASD di chuyển • Rê chuột nhìn xung quanh • Click bắn • Shift dash • F đóng băng thời gian • E nhặt súng • ESC tạm dừng • F5 để chơi lại</div>
+    <div id="time-meter">
+      <div class="tm-label">Time <span id="timescale">1.00</span>×</div>
+      <div id="time-bar"><div id="time-fill"></div></div>
+    </div>
+    <div id="hint">WASD di chuyển • Chuột phải ngắm (sniper) • Click bắn • Shift dash • F đóng băng thời gian • E nhặt súng • ESC tạm dừng • F5 để chơi lại</div>
   </div>
 
   <div id="overlay">
@@ -235,17 +329,33 @@
     import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
     import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     // === AUDIO SYSTEM (Web Audio API - procedural gunshot sounds) ===
     let audioCtx = null;
     let audioMaster = null;
     const AUDIO_POOL_SIZE = 12;
+
+    // Master lowpass: sweeps down when time slows, muffling all sound (bullet-time feel)
+    let audioLowpass = null;
 
     function initAudio() {
       if (audioCtx) return;
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       audioMaster = audioCtx.createGain();
       audioMaster.gain.value = 0.35;
-      audioMaster.connect(audioCtx.destination);
+      audioLowpass = audioCtx.createBiquadFilter();
+      audioLowpass.type = "lowpass";
+      audioLowpass.frequency.value = 19000;
+      audioLowpass.Q.value = 0.4;
+      audioMaster.connect(audioLowpass);
+      audioLowpass.connect(audioCtx.destination);
+    }
+
+    function setAudioTimeScale(t) {
+      if (!audioLowpass) return;
+      // t in [0,1]: 0 = frozen (muffled ~350Hz), 1 = full speed (open ~19kHz)
+      audioLowpass.frequency.value = 350 * Math.pow(19000 / 350, THREE.MathUtils.clamp(t, 0, 1));
     }
 
     // Resume audio context on user interaction (browser autoplay policy)
@@ -276,6 +386,9 @@
       "minigun":      { attack: 0.001, decay: 0.03, sustain: 0.01, release: 0.04, filterFreq: 3800, filterQ: 1.0, pitch: 200, pitchDecay: 0.02, gain: 0.4, distortion: 0.2 },
       "plasma-rifle": { attack: 0.001, decay: 0.06, sustain: 0.08, release: 0.15, filterFreq: 6000, filterQ: 3.0, pitch: 600, pitchDecay: 0.1,  gain: 0.6, distortion: 0.1 },
       "dual-pistol":  { attack: 0.001, decay: 0.05, sustain: 0.02, release: 0.08, filterFreq: 3600, filterQ: 1.3, pitch: 200, pitchDecay: 0.04, gain: 0.55, distortion: 0.25 },
+      "heavy-cannon": { attack: 0.001, decay: 0.12, sustain: 0.06, release: 0.30, filterFreq: 2000, filterQ: 1.4, pitch: 90,  pitchDecay: 0.09, gain: 1.0, distortion: 0.5 },
+      "grenade-launcher": { attack: 0.002, decay: 0.10, sustain: 0.05, release: 0.22, filterFreq: 1200, filterQ: 0.8, pitch: 75, pitchDecay: 0.10, gain: 0.85, distortion: 0.45 },
+      "railgun":      { attack: 0.001, decay: 0.08, sustain: 0.10, release: 0.45, filterFreq: 7000, filterQ: 2.5, pitch: 700, pitchDecay: 0.15, gain: 0.9, distortion: 0.25 },
     };
 
     let _noiseBuffer = null;
@@ -284,8 +397,13 @@
       return _noiseBuffer;
     }
 
-    // Create distortion curve for waveshaper
+    // Create distortion curve for waveshaper.
+    // Cached by amount: this used to allocate a fresh 44100-float array per shot,
+    // which produced megabytes of garbage per second under automatic fire.
+    const _distortionCurveCache = new Map();
     function makeDistortionCurve(amount) {
+      const cached = _distortionCurveCache.get(amount);
+      if (cached) return cached;
       const samples = 44100;
       const curve = new Float32Array(samples);
       const deg = Math.PI / 180;
@@ -294,11 +412,18 @@
         const x = (i * 2) / samples - 1;
         curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
       }
+      _distortionCurveCache.set(amount, curve);
       return curve;
     }
 
+    // Voice limiting: with ~50 active enemies the unbounded version stacked dozens
+    // of simultaneous gunshot graphs and audibly crackled / burned CPU.
+    const MAX_CONCURRENT_GUNSHOTS = 10;
+    let _activeGunSounds = 0;
+
     function playGunSound(weaponId, volume = 1.0) {
       if (!audioCtx) return;
+      if (volume < 0.1 || _activeGunSounds >= MAX_CONCURRENT_GUNSHOTS) return;
       ensureAudio();
 
       const prof = weaponSoundProfiles[weaponId] || weaponSoundProfiles["player-rifle"];
@@ -353,6 +478,8 @@
       osc.connect(oscGain);
       oscGain.connect(audioMaster);
 
+      _activeGunSounds++;
+      noiseSource.onended = () => { _activeGunSounds = Math.max(0, _activeGunSounds - 1); };
       noiseSource.start(now);
       noiseSource.stop(now + totalDuration + 0.05);
       osc.start(now);
@@ -431,22 +558,90 @@
     camera.position.set(0, 1.7, 9);
 
     const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
+    renderer.setPixelRatio(1);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.25;
+    renderer.toneMappingExposure = 1.45;
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
     document.body.appendChild(renderer.domElement);
 
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    // Bloom at 1/4 resolution for performance (minimal visual impact since bloom is blurry)
-    const bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(Math.floor(window.innerWidth / 4), Math.floor(window.innerHeight / 4)),
-      0.4, 0.35, 0.85
-    );
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.4, 0.35, 0.85);
     composer.addPass(bloomPass);
 
-    const hemi = new THREE.HemisphereLight(0xcfefff, 0x243248, 1.35);
+    // Bullet-time color grading: vignette + cool desaturation + edge chromatic
+    // aberration, all driven by how slow time currently is. One cheap fullscreen
+    // pass at the (adaptively scaled) render resolution.
+    const gradePass = new ShaderPass({
+      uniforms: {
+        tDiffuse: { value: null },
+        uSlow: { value: 0 },
+        uFreeze: { value: 0 }
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D tDiffuse;
+        uniform float uSlow;
+        uniform float uFreeze;
+        varying vec2 vUv;
+        void main() {
+          vec2 c = vUv - 0.5;
+          float r2 = dot(c, c);
+          vec2 caOff = c * ((uSlow * 0.55 + uFreeze) * 0.040 * r2);
+          vec3 col;
+          col.r = texture2D(tDiffuse, vUv + caOff).r;
+          col.g = texture2D(tDiffuse, vUv).g;
+          col.b = texture2D(tDiffuse, vUv - caOff).b;
+          float lum = dot(col, vec3(0.299, 0.587, 0.114));
+          // Cool grade keeps most of the original color; the scene is already
+          // dark, so grading must never crush overall brightness.
+          vec3 cool = mix(vec3(lum), vec3(lum) * vec3(0.84, 0.97, 1.18), 0.8);
+          col = mix(col, cool, uSlow * 0.28 + uFreeze * 0.18);
+          col = mix(col, col * vec3(0.78, 0.94, 1.28) + vec3(0.0, 0.015, 0.05), uFreeze * 0.4);
+          // Edge-only vignette: zero effect inside r2 < 0.10 (the whole center),
+          // ramping up only toward corners (r2 max = 0.5).
+          float edge = smoothstep(0.10, 0.52, r2);
+          col *= 1.0 - edge * (0.14 + uSlow * 0.28 + uFreeze * 0.20);
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `
+    });
+    composer.addPass(gradePass);
+    // CRITICAL: three only applies tone mapping (ACES) + sRGB output encoding
+    // when rendering directly to screen. Inside an EffectComposer everything
+    // targets intermediate buffers, so without this pass the canvas receives
+    // raw linear values and the whole game looks crushed-dark.
+    composer.addPass(new OutputPass());
+    let _gradeSlow = 0;
+    let _gradeFreeze = 0;
+
+    // Dynamic resolution: the render buffer is capped near 1440p worth of pixels
+    // (a 4K canvas is fill-rate bound) and adapts at runtime to hold ~60fps.
+    // The canvas is stretched to the window by CSS, so HUD/input are unaffected.
+    // Note: composer.addPass/setSize resets bloom to full buffer size, so bloom
+    // must be re-shrunk in applyRenderSize (the constructor resolution is ignored).
+    const TARGET_PIXELS = 2560 * 1440;
+    const MIN_RENDER_SCALE = 0.55;
+    let renderScale = Math.min(1, Math.sqrt(TARGET_PIXELS / (window.innerWidth * window.innerHeight)));
+
+    function applyRenderSize() {
+      const w = Math.max(2, Math.round(window.innerWidth * renderScale));
+      const h = Math.max(2, Math.round(window.innerHeight * renderScale));
+      renderer.setSize(w, h, false);
+      composer.setSize(w, h);
+      bloomPass.setSize(w / 2, h / 2); // internal mip chain starts at w/4 — bloom is blurry anyway
+    }
+    applyRenderSize();
+
+    const hemi = new THREE.HemisphereLight(0xcfefff, 0x243248, 1.55);
     scene.add(hemi);
 
     const dir = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -520,6 +715,19 @@
     };
     const hitTimers = { top: 0, bottom: 0, left: 0, right: 0 };
     const HIT_FLASH_DURATION = 0.5; // seconds
+
+    const hitmarkerEl = document.getElementById("hitmarker");
+    const hpFillEl = document.getElementById("hp-fill");
+    const armorFillEl = document.getElementById("armor-fill");
+    const timeFillEl = document.getElementById("time-fill");
+    const timeMeterEl = document.getElementById("time-meter");
+    let hitMarkerTimer = 0;
+
+    function showHitMarker(kill) {
+      hitMarkerTimer = 0.16;
+      hitmarkerEl.classList.toggle("kill", kill);
+      hitmarkerEl.style.opacity = "1";
+    }
 
     function showHitDirection(bulletPos) {
       // Vector from player to bullet in world space
@@ -2088,6 +2296,10 @@
       hole.scale.set(holeScale, holeScale, holeScale);
       group.add(hole);
       scene.add(group);
+      group.updateMatrixWorld(true);
+      group.matrixAutoUpdate = false;
+      hole.matrixAutoUpdate = false;
+      group.matrixWorldAutoUpdate = false;
 
       bulletHoles.push(group);
       if (bulletHoles.length > MAX_BULLET_HOLES) {
@@ -2095,8 +2307,29 @@
         scene.remove(oldHole);
       }
 
-      // Impact particles disabled
+      // Impact feedback: dust puff along the surface normal + a few hot chips.
+      // Both systems are pre-allocated (no per-impact garbage).
+      if (smkCount < SMK_MAX - 4) {
+        const kick = 0.6 + speed * 0.02;
+        for (let i = 0; i < 4; i++) {
+          emitSmkAt(
+            point.x + normal.x * 0.06, point.y + normal.y * 0.06 + 0.03, point.z + normal.z * 0.06,
+            normal.x * kick * (0.5 + Math.random()) + (Math.random() - 0.5) * 0.9,
+            Math.max(0.25, normal.y * kick) * (0.6 + Math.random()) + 0.3,
+            normal.z * kick * (0.5 + Math.random()) + (Math.random() - 0.5) * 0.9,
+            0.45 + Math.random() * 0.5, 0.3, 0.4 + Math.random() * 0.45
+          );
+        }
+      }
+      _impactChipCfg.colors = normal.y > 0.5 ? gpuImpactColors : gpuFireColors;
+      emitGpu(point, 5, _impactChipCfg);
     }
+
+    const _impactChipCfg = {
+      colors: null, spdMin: 2.5, spdMax: 7.5, elevBias: 0.15, upBias: 1.4,
+      sizeMin: 3, sizeMax: 6.5, lifeMin: 0.15, lifeMax: 0.42, alpha: 0.95,
+      gravity: 9, drag: 0.94, spread: 0.05
+    };
 
     const _aiPoint = new THREE.Vector3();
     const _aiNormal = new THREE.Vector3();
@@ -2425,6 +2658,11 @@
           if (isPositionBlockedByObstacle(mesh.position, scaledR + 2.8)) continue;
 
           scene.add(mesh);
+          // Obstacles never move: compute world matrices once, then stop the
+          // renderer from re-walking ~1500 static nodes every frame.
+          mesh.updateMatrixWorld(true);
+          mesh.traverse((o) => { o.matrixAutoUpdate = false; });
+          mesh.matrixWorldAutoUpdate = false;
           obstacles.push({
             mesh,
             radius: scaledR,
@@ -2466,6 +2704,9 @@
           if (isPositionBlockedByObstacle(mesh.position, scaledR + 3.0)) continue;
 
           scene.add(mesh);
+          mesh.updateMatrixWorld(true);
+          mesh.traverse((o) => { o.matrixAutoUpdate = false; });
+          mesh.matrixWorldAutoUpdate = false;
           obstacles.push({
             mesh,
             radius: scaledR,
@@ -2539,6 +2780,70 @@
     const EXPLOSION_COLOR_A = new THREE.Color(0xff4400);
     const EXPLOSION_COLOR_B = new THREE.Color(0xffcc00);
 
+    // Fixed pool of explosion lights, always present in the scene at intensity 0.
+    // Adding/removing PointLights changes the scene light count, which forces
+    // Three.js to recompile every MeshStandardMaterial shader — a 100ms+ hitch
+    // on the first (and every light-count-changing) explosion.
+    const _explosionLights = [];
+    for (let i = 0; i < 4; i++) {
+      const l = new THREE.PointLight(0xff6600, 0, 40);
+      l.position.set(0, -100, 0);
+      scene.add(l);
+      _explosionLights.push(l);
+    }
+    let _explosionLightIdx = 0;
+
+    // Ground shockwave rings (pooled, additive) — the expanding pressure wave look
+    const _shockRingGeo = new THREE.RingGeometry(0.86, 1.0, 40);
+    const _shockRings = [];
+    for (let i = 0; i < 4; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffd9a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+        depthWrite: false, side: THREE.DoubleSide
+      });
+      const ring = new THREE.Mesh(_shockRingGeo, mat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.visible = false;
+      scene.add(ring);
+      _shockRings.push(ring);
+    }
+    let _shockRingIdx = 0;
+
+    // Scorch decals left on the ground by explosions
+    const scorchGeo = new THREE.CircleGeometry(1, 20);
+    const scorchMat = new THREE.MeshBasicMaterial({
+      color: 0x0b0a08, transparent: true, opacity: 0.55, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3
+    });
+    const scorchMarks = [];
+    const MAX_SCORCH = 10;
+    function addScorch(x, z, r) {
+      const m = new THREE.Mesh(scorchGeo, scorchMat);
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(x, 0.025, z);
+      m.scale.setScalar(r);
+      m.updateMatrixWorld(true);
+      m.matrixAutoUpdate = false;
+      m.matrixWorldAutoUpdate = false;
+      scene.add(m);
+      scorchMarks.push(m);
+      if (scorchMarks.length > MAX_SCORCH) scene.remove(scorchMarks.shift());
+    }
+    function clearScorch() {
+      for (let i = 0; i < scorchMarks.length; i++) scene.remove(scorchMarks[i]);
+      scorchMarks.length = 0;
+    }
+
+    // Camera shake (applied around the render call only, never touches game logic)
+    let shakeAmp = 0;
+    function addShake(a) { shakeAmp = Math.min(0.45, shakeAmp + a); }
+
+    // Player muzzle light — one permanent pooled light so the scene light count
+    // stays constant (adding/removing lights forces shader recompiles)
+    const muzzleLight = new THREE.PointLight(0xffc98a, 0, 11, 2);
+    muzzleLight.position.set(0, -100, 0);
+    scene.add(muzzleLight);
+
     function spawnExplosion(point, radius) {
       // GPU particles for fire + smoke (no sprite allocation)
       emitGpu(point, 18, {
@@ -2551,6 +2856,18 @@
         sizeMin: 30, sizeMax: 60, lifeMin: 0.6, lifeMax: 1.2, alpha: 0.45,
         gravity: 1, drag: 0.94, spread: 0.3
       });
+      // Slow rolling smoke column (normal-blended, lingers and expands)
+      for (let i = 0; i < 10; i++) {
+        emitSmkAt(
+          point.x + (Math.random() - 0.5) * radius * 0.35,
+          point.y + Math.random() * radius * 0.3,
+          point.z + (Math.random() - 0.5) * radius * 0.35,
+          (Math.random() - 0.5) * 2.2, 1.2 + Math.random() * 2.6, (Math.random() - 0.5) * 2.2,
+          1.6 + Math.random() * 2.2, 0.5, 1.1 + Math.random() * 1.1
+        );
+      }
+      // Hot debris chunks
+      spawnFragments(point, UP_AXIS, null, 0x3a352c, 8, 0.05, 0.22, 3.5, 9);
 
       const glowMat = new THREE.SpriteMaterial({
         color: 0xff6600, transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending
@@ -2560,11 +2877,45 @@
       glow.scale.set(radius * 1.5, radius * 1.5, 1);
       scene.add(glow);
 
-      const light = new THREE.PointLight(0xff6600, 8, radius * 3);
-      light.position.copy(point);
-      scene.add(light);
+      // Initial white-hot flash (very short)
+      const flashMat = new THREE.SpriteMaterial({
+        map: flashTexture, color: 0xffffff, transparent: true, opacity: 1.0,
+        blending: THREE.AdditiveBlending, depthWrite: false
+      });
+      const flash = new THREE.Sprite(flashMat);
+      flash.position.copy(point);
+      flash.scale.set(radius * 2.0, radius * 2.0, 1);
+      scene.add(flash);
 
-      explosionEffects.push({ glow, light, life: 1.2, duration: 1.2 });
+      const light = _explosionLights[_explosionLightIdx];
+      _explosionLightIdx = (_explosionLightIdx + 1) % _explosionLights.length;
+      // Unlink the light from any older effect still holding it (round-robin steal)
+      for (let i = 0; i < explosionEffects.length; i++) {
+        if (explosionEffects[i].light === light) explosionEffects[i].light = null;
+      }
+      light.position.copy(point);
+      light.distance = radius * 3;
+      light.intensity = 8;
+
+      // Ground shockwave + scorch only for near-ground detonations
+      let ring = null;
+      if (point.y < 3.5) {
+        ring = _shockRings[_shockRingIdx];
+        _shockRingIdx = (_shockRingIdx + 1) % _shockRings.length;
+        for (let i = 0; i < explosionEffects.length; i++) {
+          if (explosionEffects[i].ring === ring) explosionEffects[i].ring = null;
+        }
+        ring.position.set(point.x, 0.07, point.z);
+        ring.scale.setScalar(0.5);
+        ring.material.opacity = 0.75;
+        ring.visible = true;
+        addScorch(point.x, point.z, radius * 0.55);
+      }
+
+      const shakeDist = point.distanceTo(camera.position);
+      addShake(0.4 * THREE.MathUtils.clamp(1 - shakeDist / 50, 0, 1));
+
+      explosionEffects.push({ glow, flash, light, ring, ringMax: radius * 2.3, baseR: radius, life: 1.2, duration: 1.2 });
     }
 
     function updateExplosionEffects(dt) {
@@ -2573,12 +2924,35 @@
         fx.life -= dt;
         const t = 1 - fx.life / fx.duration;
         fx.glow.material.opacity = Math.max(0, 1 - t * 2);
-        fx.light.intensity = Math.max(0, 8 * (1 - t * 1.5));
+        if (fx.light) fx.light.intensity = Math.max(0, 8 * (1 - t * 1.5));
+
+        if (fx.flash) {
+          fx.flash.material.opacity = Math.max(0, 1 - t * 7);
+          const fs = fx.baseR * (2.0 + t * 6);
+          fx.flash.scale.set(fs, fs, 1);
+          if (t * 7 >= 1) {
+            scene.remove(fx.flash);
+            fx.flash.material.dispose();
+            fx.flash = null;
+          }
+        }
+
+        if (fx.ring) {
+          const rt = Math.min(1, t * 2.4);
+          fx.ring.scale.setScalar(0.5 + rt * fx.ringMax);
+          fx.ring.material.opacity = (1 - rt) * (1 - rt) * 0.75;
+          if (rt >= 1) {
+            fx.ring.visible = false;
+            fx.ring = null;
+          }
+        }
 
         if (fx.life <= 0) {
           scene.remove(fx.glow);
           fx.glow.material.dispose();
-          scene.remove(fx.light);
+          if (fx.flash) { scene.remove(fx.flash); fx.flash.material.dispose(); }
+          if (fx.ring) fx.ring.visible = false;
+          if (fx.light) fx.light.intensity = 0;
           explosionEffects.splice(i, 1);
         }
       }
@@ -2589,7 +2963,9 @@
         const fx = explosionEffects[i];
         scene.remove(fx.glow);
         fx.glow.material.dispose();
-        scene.remove(fx.light);
+        if (fx.flash) { scene.remove(fx.flash); fx.flash.material.dispose(); }
+        if (fx.ring) fx.ring.visible = false;
+        if (fx.light) fx.light.intensity = 0;
       }
       explosionEffects.length = 0;
     }
@@ -2608,6 +2984,7 @@
       if (creditToPlayer) {
         player.kills += 1;
         registerPlayerKill();
+        showHitMarker(true);
         if (wasBoss) freezeCharge += 3;
       }
     }
@@ -2629,6 +3006,7 @@
         player.hp -= amount;
       }
       if (amount > 5) playHitSound(Math.min(1, amount / 40));
+      if (amount > 3) addShake(Math.min(0.22, 0.06 + amount * 0.003));
       player.hp = Math.max(player.hp, -1);
     }
 
@@ -3987,6 +4365,12 @@
       clearDroppedWeapons();
       clearDroppedHealth();
       clearDroppedArmor();
+      clearShells();
+      clearScorch();
+      shakeAmp = 0;
+      muzzleLight.intensity = 0;
+      hitMarkerTimer = 0;
+      hitmarkerEl.style.opacity = "0";
       bullets.length = 0;
       enemies.length = 0;
       bulletHoles.length = 0;
@@ -4148,18 +4532,18 @@
     const instTempScale = new THREE.Vector3();
     const instTempPos = new THREE.Vector3();
     const instTempQuat = new THREE.Quaternion();
-    const bandRotQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
 
+    // Flying bullets render only tip + body — a real projectile leaves its case
+    // behind at the gun. The casing InstancedMesh is reused for ejected shells.
     for (const wid of Object.keys(BULLET_SHAPES)) {
       const geos = getBulletGeos(wid);
       const mats = getBulletMats(wid);
       const bi = {
         tip: new THREE.InstancedMesh(geos.tip, mats.tip, MAX_BULLET_INST),
         body: new THREE.InstancedMesh(geos.body, mats.body, MAX_BULLET_INST),
-        casing: new THREE.InstancedMesh(geos.casing, mats.casing, MAX_BULLET_INST),
-        band: new THREE.InstancedMesh(geos.band, mats.band, MAX_BULLET_INST)
+        casing: new THREE.InstancedMesh(geos.casing, mats.casing, MAX_BULLET_INST)
       };
-      for (const key of ['tip', 'body', 'casing', 'band']) {
+      for (const key of ['tip', 'body', 'casing']) {
         bi[key].count = 0;
         bi[key].frustumCulled = false;
         scene.add(bi[key]);
@@ -4182,10 +4566,71 @@
 
     const bulletInstKeys = Object.keys(bulletInstData);
     const bulletInstCounters = {};
-    for (const wid of bulletInstKeys) bulletInstCounters[wid] = 0;
+    const shellInstCounters = {};
+    for (const wid of bulletInstKeys) { bulletInstCounters[wid] = 0; shellInstCounters[wid] = 0; }
+
+    // === Ejected shell casings ===
+    // Spawned at the muzzle on every (non-rocket) shot, tumble with gravity,
+    // bounce and settle on the ground. Rendered through the per-weapon casing
+    // InstancedMesh, so the whole system costs zero extra draw calls.
+    const MAX_SHELLS = 60;
+    const shells = [];
+    let _shellCursor = 0;
+    const _shellEuler = new THREE.Euler();
+    const _shellRight = new THREE.Vector3();
+
+    function ejectShell(origin, dir, wid) {
+      if (!bulletInstData[wid]) return;
+      let s;
+      if (shells.length >= MAX_SHELLS) {
+        s = shells[_shellCursor % MAX_SHELLS];
+        _shellCursor++;
+      } else {
+        s = { wid: "", px: 0, py: 0, pz: 0, vx: 0, vy: 0, vz: 0, rx: 0, ry: 0, rz: 0, avx: 0, avy: 0, avz: 0, life: 0 };
+        shells.push(s);
+      }
+      _shellRight.set(-dir.z, 0, dir.x);
+      if (_shellRight.lengthSq() < 0.001) _shellRight.set(1, 0, 0);
+      _shellRight.normalize();
+      s.wid = wid;
+      s.px = origin.x - dir.x * 0.25 + _shellRight.x * 0.12;
+      s.py = origin.y + 0.06;
+      s.pz = origin.z - dir.z * 0.25 + _shellRight.z * 0.12;
+      s.vx = _shellRight.x * (1.2 + Math.random() * 1.5) - dir.x * 0.4;
+      s.vy = 1.8 + Math.random() * 1.5;
+      s.vz = _shellRight.z * (1.2 + Math.random() * 1.5) - dir.z * 0.4;
+      s.rx = Math.random() * Math.PI * 2; s.ry = Math.random() * Math.PI * 2; s.rz = 0;
+      s.avx = (Math.random() - 0.5) * 24; s.avy = (Math.random() - 0.5) * 24; s.avz = (Math.random() - 0.5) * 24;
+      s.life = 2.8;
+    }
+
+    function updateShells(dt) {
+      if (dt <= 0) return;
+      for (let i = shells.length - 1; i >= 0; i--) {
+        const s = shells[i];
+        s.life -= dt;
+        if (s.life <= 0) {
+          const last = shells.length - 1;
+          if (i !== last) shells[i] = shells[last];
+          shells.pop();
+          continue;
+        }
+        s.vy -= 9.8 * dt;
+        s.px += s.vx * dt; s.py += s.vy * dt; s.pz += s.vz * dt;
+        s.rx += s.avx * dt; s.ry += s.avy * dt; s.rz += s.avz * dt;
+        if (s.py < 0.04) {
+          s.py = 0.04;
+          s.vy *= -0.3; s.vx *= 0.6; s.vz *= 0.6;
+          s.avx *= 0.4; s.avy *= 0.4; s.avz *= 0.4;
+          if (Math.abs(s.vy) < 0.5) { s.vy = 0; s.avx = 0; s.avz = 0; }
+        }
+      }
+    }
+
+    function clearShells() { shells.length = 0; _shellCursor = 0; }
 
     function updateBulletInstances() {
-      for (const wid of bulletInstKeys) bulletInstCounters[wid] = 0;
+      for (const wid of bulletInstKeys) { bulletInstCounters[wid] = 0; shellInstCounters[wid] = 0; }
 
       for (let i = 0; i < bullets.length; i++) {
         const b = bullets[i];
@@ -4211,33 +4656,35 @@
         instTempPos.add(b.bPos);
         instTempMat.compose(instTempPos, b.bQuat, instTempScale);
         bi.tip.setMatrixAt(idx, instTempMat);
+      }
 
-        // Casing
-        instTempPos.set(0, off.casingY, 0).applyQuaternion(b.bQuat);
-        instTempPos.x *= off.sz; instTempPos.y *= off.sz; instTempPos.z *= off.sz;
-        instTempPos.add(b.bPos);
-        instTempMat.compose(instTempPos, b.bQuat, instTempScale);
-        bi.casing.setMatrixAt(idx, instTempMat);
-
-        // Band (with spin)
-        instTempPos.set(0, off.bandY, 0).applyQuaternion(b.bQuat);
-        instTempPos.x *= off.sz; instTempPos.y *= off.sz; instTempPos.z *= off.sz;
-        instTempPos.add(b.bPos);
-        instTempQuat.copy(b.bQuat).multiply(bandRotQuat);
+      // Ejected shells render through the casing InstancedMesh
+      for (let i = 0; i < shells.length; i++) {
+        const s = shells[i];
+        const bi = bulletInstData[s.wid];
+        if (!bi) continue;
+        const idx = shellInstCounters[s.wid];
+        if (idx >= MAX_BULLET_INST) continue;
+        shellInstCounters[s.wid]++;
+        const off = bulletPartOffsets[s.wid];
+        instTempScale.set(off.sx, off.sy, off.sz);
+        instTempPos.set(s.px, s.py, s.pz);
+        _shellEuler.set(s.rx, s.ry, s.rz);
+        instTempQuat.setFromEuler(_shellEuler);
         instTempMat.compose(instTempPos, instTempQuat, instTempScale);
-        bi.band.setMatrixAt(idx, instTempMat);
+        bi.casing.setMatrixAt(idx, instTempMat);
       }
 
       for (const wid of bulletInstKeys) {
         const bi = bulletInstData[wid];
         const c = bulletInstCounters[wid] || 0;
-        bi.tip.count = c; bi.body.count = c; bi.casing.count = c; bi.band.count = c;
+        const sc = shellInstCounters[wid] || 0;
+        bi.tip.count = c; bi.body.count = c; bi.casing.count = sc;
         if (c > 0) {
           bi.tip.instanceMatrix.needsUpdate = true;
           bi.body.instanceMatrix.needsUpdate = true;
-          bi.casing.instanceMatrix.needsUpdate = true;
-          bi.band.instanceMatrix.needsUpdate = true;
         }
+        if (sc > 0) bi.casing.instanceMatrix.needsUpdate = true;
       }
     }
 
@@ -4286,7 +4733,6 @@
     const MUZZLE_POOL_SIZE = 24;
     const MAX_SPARK_COUNT = 14; // max sparkCount across all weapons
     const _muzzlePool = [];
-    const _muzzleDir = new THREE.Vector3();
     function _createMuzzlePoolEntry() {
       const coneMat = playerMuzzleConeMatTemplate.clone();
       const cone = new THREE.Mesh(muzzleConeGeo, coneMat);
@@ -4298,7 +4744,7 @@
       sparkGeo.setAttribute("position", new THREE.BufferAttribute(sparkPos, 3));
       const sparkMat = playerSparkMatTemplate.clone();
       const sparks = new THREE.Points(sparkGeo, sparkMat);
-      return { cone, sprite, sparks, sparkPos, sparkVel, sparkGeo, coneMat, spriteMat, sparkMat };
+      return { cone, sprite, sparks, sparkPos, sparkVel, sparkGeo, coneMat, spriteMat, sparkMat, dir: new THREE.Vector3() };
     }
     for (let pi = 0; pi < MUZZLE_POOL_SIZE; pi++) _muzzlePool.push(_createMuzzlePoolEntry());
 
@@ -4349,14 +4795,14 @@
       entry.sparkMat.opacity = 0.88;
 
       scene.add(entry.cone, entry.sprite, entry.sparks);
-      _muzzleDir.copy(dir);
+      entry.dir.copy(dir);
       muzzleEffects.push({
         cone: entry.cone,
         sprite: entry.sprite,
         sparks: entry.sparks,
         sparkPos,
         sparkVel,
-        dir: _muzzleDir.clone(),
+        dir: entry.dir,
         baseSpriteScale,
         life: 0.1,
         duration: 0.1,
@@ -4416,9 +4862,17 @@
     function getPooledTrail() {
       if (trailPool.length > 0) return trailPool.pop();
       const spinePos = new Float32Array(TRAIL_SEGMENTS * 3);
-      const core = createTrailRibbon(trailCoreMat);
-      const outer = createTrailRibbon(trailOuterMat);
-      return { spinePos, coreMesh: core.mesh, corePos: core.positions, outerMesh: outer.mesh, outerPos: outer.positions };
+      // Per-trail material clones (same shader program, own color uniform)
+      // so each weapon can tint its own tracer.
+      const coreMat = trailCoreMat.clone();
+      const outerMat = trailOuterMat.clone();
+      const core = createTrailRibbon(coreMat);
+      const outer = createTrailRibbon(outerMat);
+      return {
+        spinePos,
+        coreMesh: core.mesh, corePos: core.positions, coreMat,
+        outerMesh: outer.mesh, outerPos: outer.positions, outerMat
+      };
     }
     function returnTrail(trail) {
       scene.remove(trail.coreMesh);
@@ -4438,7 +4892,7 @@
         start: new THREE.Vector3(), vel: new THREE.Vector3(),
         gravity: 0, spin: 0, spinPhase: 0, ringAngle: 0,
         trailTimer: 0, trailSeed: 0, trailAmplitude: 0, trailJitter: 0,
-        twistA: 0, trailSpacing: 0, headOffset: 0, life: 0,
+        twistA: 0, trailSpacing: 0, headOffset: 0, life: 0, vaporAcc: 0,
         enemy: false, damage: 0, radius: 0, isRocket: false, explosionRadius: 0
       };
     }
@@ -4447,6 +4901,7 @@
     function shoot(from, dir, weapon, fromEnemy, distanceHint = 20, ownerEnemyId = null) {
       const pellets = Math.max(1, weapon.pellets || 1);
       spawnMuzzleFlash(from, dir, weapon, fromEnemy);
+      if (!weapon.isRocket) ejectShell(from, dir, weapon.id);
 
       for (let pellet = 0; pellet < pellets; pellet++) {
         if (pellets === 1) { _shootDir.copy(dir); } else { applyDirectionSpread(dir, weapon.spread * 0.95); _shootDir.copy(_spreadResult); }
@@ -4456,6 +4911,11 @@
           const idx = i * 3;
           trail.spinePos[idx] = from.x; trail.spinePos[idx + 1] = from.y; trail.spinePos[idx + 2] = from.z;
         }
+        // Hot white-ish core, weapon-tinted halo
+        trail.coreMat.uniforms.color.value.setHex(0xfff3dd);
+        trail.coreMat.uniforms.baseOpacity.value = 0.26;
+        trail.outerMat.uniforms.color.value.setHex(weapon.ringColor || 0xd0cdc6);
+        trail.outerMat.uniforms.baseOpacity.value = 0.07;
         scene.add(trail.coreMesh);
         scene.add(trail.outerMesh);
 
@@ -4486,6 +4946,7 @@
         b.twistA = weapon.twistA ?? 1.2;
         b.trailSpacing = weapon.trailSpacing ?? 0.73;
         b.headOffset = 0.18 * (weapon.scaleY || 1);
+        b.vaporAcc = Math.random() * 0.8;
         b.life = weapon.life ?? 3.8;
         b.enemy = fromEnemy;
         b.damage = weapon.damage ?? 1;
@@ -4515,6 +4976,17 @@
       shoot(tempVec4, tempVec3, playerWeapon, false, distanceHint);
       playGunSound(playerWeapon.id, 1.0);
       player.fireCooldown = playerWeapon.shotInterval;
+
+      // Muzzle light pulse (pooled, permanent light — no shader recompile)
+      muzzleLight.position.copy(tempVec4);
+      muzzleLight.intensity = 3.5 + (playerWeapon.power || 0.6) * 4;
+
+      // Recoil: pitch kick + tiny random yaw, halved when scoped
+      const rk = (playerWeapon.power || 0.6) * (isAiming ? 0.003 : 0.006);
+      pitch = THREE.MathUtils.clamp(pitch + rk, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+      yaw += (Math.random() - 0.5) * rk * 0.5;
+      camera.rotation.set(pitch, yaw, 0, "YXZ");
+      addShake(0.012 + (playerWeapon.power || 0.6) * 0.03);
     }
 
     let hudThrottle = 0;
@@ -4525,6 +4997,9 @@
       hpEl.textContent = Math.max(0, Math.floor(player.hp));
       armorEl.textContent = Math.max(0, Math.floor(player.armor));
       armorEl.style.color = player.armor > 0 ? "#6ee7ff" : "#888";
+      hpFillEl.style.width = Math.max(0, Math.min(100, player.hp)) + "%";
+      hpFillEl.classList.toggle("low", player.hp <= 30);
+      armorFillEl.style.width = Math.max(0, Math.min(100, player.armor)) + "%";
       killsEl.textContent = player.kills;
       timeScaleEl.textContent = timeScale.toFixed(2);
       dashEl.textContent = player.dashCd <= 0 ? "Ready" : `${player.dashCd.toFixed(1)}s`;
@@ -4591,7 +5066,7 @@
       card.querySelector("h1").textContent = "Bạn đã thua!";
       card.querySelector("h1").style.color = "#ff6b6b";
       card.querySelectorAll("p:not(.big)").forEach(p => p.style.display = "none");
-      card.querySelector(".big").innerHTML = `Kills: ${player.kills} | Thời gian: ${formatTime(playTime)}<br><br><span style="font-size:14px;opacity:0.8">Nhấn F5 để chơi lại</span>`;
+      card.querySelector(".big").innerHTML = `Kills: ${player.kills} | Thời gian: ${formatTime(playTime)}<br><br><span style="font-size:14px;opacity:0.8">Nhấn R để chơi lại</span>`;
       document.exitPointerLock();
     }
 
@@ -4600,10 +5075,10 @@
       gameWon = true;
       overlay.classList.remove("hidden");
       const card = overlay.querySelector(".card");
-      card.querySelector("h1").textContent = "Chuc mung! Ban da chien thang!";
+      card.querySelector("h1").textContent = "Chúc mừng! Bạn đã chiến thắng!";
       card.querySelector("h1").style.color = "#6ee7ff";
       card.querySelectorAll("p:not(.big)").forEach(p => p.style.display = "none");
-      card.querySelector(".big").innerHTML = `Kills: ${player.kills} | Thoi gian: ${formatTime(playTime)}<br><br><span style="font-size:14px;opacity:0.8">Nhan R de choi lai</span>`;
+      card.querySelector(".big").innerHTML = `Kills: ${player.kills} | Thời gian: ${formatTime(playTime)}<br><br><span style="font-size:14px;opacity:0.8">Nhấn R để chơi lại</span>`;
       document.exitPointerLock();
     }
 
@@ -4678,8 +5153,10 @@
 
     document.addEventListener("mousemove", (e) => {
       if (!document.pointerLockElement || gameOver) return;
-      yaw -= e.movementX * 0.0026;
-      pitch -= e.movementY * 0.0023;
+      // Scale sensitivity with zoom so the sniper scope is controllable
+      const sens = camera.fov / BASE_FOV;
+      yaw -= e.movementX * 0.0026 * sens;
+      pitch -= e.movementY * 0.0023 * sens;
       pitch = THREE.MathUtils.clamp(pitch, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
       camera.rotation.set(pitch, yaw, 0, "YXZ");
     });
@@ -4712,7 +5189,8 @@
       if (mouseDown && document.pointerLockElement && pointerLockGrace <= 0) tryPlayerShoot();
 
       if (!canUseSniperScope() && isAiming) setAiming(false);
-      const targetFov = isAiming ? SNIPER_SCOPE_FOV : BASE_FOV;
+      // Slight FOV kick while dashing sells the burst of speed
+      const targetFov = (isAiming ? SNIPER_SCOPE_FOV : BASE_FOV) + (player.dashTimer > 0 ? 10 : 0);
       if (Math.abs(camera.fov - targetFov) > 0.02) {
         camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 10);
         camera.updateProjectionMatrix();
@@ -4726,7 +5204,7 @@
     }
 
     const ENEMY_FULL_UPDATE_DIST = 80;
-    const ENEMY_SLEEP_DIST = 160;
+    const ENEMY_SLEEP_DIST = 220;
 
     function updateEnemies(gdt) {
       const playerPos = camera.position;
@@ -4737,13 +5215,27 @@
         tempVec3.copy(playerPos).sub(e.mesh.position);
         const dist = tempVec3.length();
 
-        // Skip sleeping enemies entirely (too far away)
+        // Sleeping enemies (too far away): no rig animation, no shooting, no
+        // rendering — but they still march toward the player so the whole map
+        // gradually converges on you. Straight-line move only; they're
+        // invisible at this range and the wake-up obstacle resolve pushes
+        // them out of anything they clipped through.
         if (dist > ENEMY_SLEEP_DIST) {
           e.shootCd = Math.max(e.shootCd, 0.5);
           e.mesh.visible = false;
+          // Prune the whole rig (~35 nodes) from per-frame matrix updates
+          e.mesh.matrixWorldAutoUpdate = false;
+          // Hide the health bar too — it used to be left floating in the air
+          if (e.hpBar) e.hpBar.sprite.visible = false;
+          tempVec3.y = 0;
+          tempVec3.normalize();
+          e.mesh.position.addScaledVector(tempVec3, e.speed * gdt);
           continue;
         }
-        e.mesh.visible = true;
+        if (!e.mesh.visible) {
+          e.mesh.visible = true;
+          e.mesh.matrixWorldAutoUpdate = true;
+        }
 
         const moving = dist > 5.5;
         const inRange = dist < weapon.range;
@@ -4886,6 +5378,21 @@
         }
         b.trail.coreMesh.visible = distToCam < 70;
         b.trail.outerMesh.visible = distToCam < 70;
+
+        // Vapor wake: faint smoke puffs left hanging in the air behind nearby
+        // bullets — the classic slow-motion footage look. Pre-allocated pool.
+        if (distToCam < 45 && smkCount < SMK_MAX - 2) {
+          b.vaporAcc += speedNow * bulletDt;
+          const spacing = 1.0 + b.trailSpacing;
+          if (b.vaporAcc >= spacing) {
+            b.vaporAcc -= spacing;
+            emitSmkAt(
+              p.x, p.y, p.z,
+              (Math.random() - 0.5) * 0.3, 0.1 + Math.random() * 0.18, (Math.random() - 0.5) * 0.3,
+              0.5 + Math.random() * 0.4, 0.13, 0.65 + Math.random() * 0.5
+            );
+          }
+        }
 
         const surfaceImpact = getArenaImpact(p);
         const obstacleImpact = surfaceImpact ? null : getObstacleImpact(p);
@@ -5048,6 +5555,7 @@
               e.hitMaterial.emissiveIntensity = hitIntensity;
             }
             e.hitFlash = 0.13;
+            showHitMarker(false); // upgraded to kill-red by killEnemy if the hit is lethal
 
             const isSniper = b.weapon && b.weapon.id === "sniper";
             const isHeadshot = dmgMult >= 3;
@@ -5129,10 +5637,34 @@
     }
 
     const clock = new THREE.Clock();
+    let _fpsTime = 0, _fpsFrames = 0, _fpsGoodStreak = 0;
 
     function animate() {
       requestAnimationFrame(animate);
       const dt = Math.min(0.05, clock.getDelta());
+
+      // Adaptive resolution: step down fast on sustained missed frames,
+      // recover slowly (small steps, several clean seconds required).
+      if (!paused && !gameOver) {
+        _fpsTime += dt; _fpsFrames++;
+        if (_fpsTime >= 1) {
+          const avgFrame = _fpsTime / _fpsFrames;
+          if (avgFrame > 1 / 48 && renderScale > MIN_RENDER_SCALE) {
+            renderScale = Math.max(MIN_RENDER_SCALE, renderScale - 0.1);
+            _fpsGoodStreak = 0;
+            applyRenderSize();
+          } else if (avgFrame < 1 / 59 && renderScale < 1) {
+            if (++_fpsGoodStreak >= 5) {
+              _fpsGoodStreak = 0;
+              renderScale = Math.min(1, renderScale + 0.05);
+              applyRenderSize();
+            }
+          } else {
+            _fpsGoodStreak = 0;
+          }
+          _fpsTime = 0; _fpsFrames = 0;
+        }
+      }
 
       if (paused) {
         composer.render();
@@ -5164,7 +5696,9 @@
         updateHud();
       }
 
-      const worldFxDt = freezeActive ? 0 : dt;
+      // World effects run on scaled time so smoke, sparks, shells and explosions
+      // all hang in the air together with the bullets during bullet time.
+      const worldFxDt = freezeActive ? 0 : (gameOver ? dt : dt * timeScale);
       updateImpactEffects(worldFxDt);
       updateDissolveEffects(worldFxDt);
       updateMuzzleEffects(worldFxDt);
@@ -5173,20 +5707,76 @@
       updateGpuParticles(worldFxDt);
       updateSmokeParticles(worldFxDt);
       updateFragments(worldFxDt);
+      updateShells(worldFxDt);
       updateDroppedWeapons(worldFxDt);
       updateDroppedHealth(worldFxDt);
       updateDroppedArmor(worldFxDt);
       updateHitIndicators(dt);
 
+      // --- HUD/feel updates on real time ---
+      if (hitMarkerTimer > 0) {
+        hitMarkerTimer -= dt;
+        if (hitMarkerTimer <= 0) hitmarkerEl.style.opacity = "0";
+      }
+
+      const tsT = THREE.MathUtils.clamp((timeScale - 0.038) / (1 - 0.038), 0, 1);
+      if (Math.abs(tsT - _lastTsT) > 0.004) {
+        _lastTsT = tsT;
+        timeFillEl.style.transform = `scaleX(${tsT.toFixed(3)})`;
+      }
+      if (freezeActive !== _lastFreezeUi) {
+        _lastFreezeUi = freezeActive;
+        timeMeterEl.classList.toggle("freeze", freezeActive);
+      }
+
+      const chScale = 1 + (playerWeapon && player.fireCooldown > 0
+        ? Math.min(1, player.fireCooldown / playerWeapon.shotInterval) * 0.35 : 0);
+      if (Math.abs(chScale - _lastChScale) > 0.02) {
+        _lastChScale = chScale;
+        crosshairEl.style.transform = `scale(${chScale.toFixed(2)})`;
+      }
+
+      // Bullet-time grading follows the current time scale
+      const slowTarget = freezeActive ? 0.85 : THREE.MathUtils.clamp(1 - timeScale, 0, 1) * (gameOver ? 0.25 : 1);
+      _gradeSlow += (slowTarget - _gradeSlow) * Math.min(1, dt * 7);
+      _gradeFreeze += ((freezeActive ? 1 : 0) - _gradeFreeze) * Math.min(1, dt * 6);
+      gradePass.uniforms.uSlow.value = _gradeSlow;
+      gradePass.uniforms.uFreeze.value = _gradeFreeze;
+      setAudioTimeScale(freezeActive ? 0 : timeScale);
+
+      if (muzzleLight.intensity > 0.02) muzzleLight.intensity *= Math.exp(-26 * dt);
+      else muzzleLight.intensity = 0;
+
+      // Camera shake: applied only around the render, restored right after,
+      // so game logic never sees the offset.
+      let _sox = 0, _soy = 0, _soz = 0, _srz = 0;
+      if (shakeAmp > 0.0015) {
+        shakeAmp *= Math.exp(-6.5 * dt);
+        _sox = (Math.random() - 0.5) * 2 * shakeAmp;
+        _soy = (Math.random() - 0.5) * 1.4 * shakeAmp;
+        _soz = (Math.random() - 0.5) * 2 * shakeAmp;
+        _srz = (Math.random() - 0.5) * 0.12 * shakeAmp;
+        camera.position.x += _sox; camera.position.y += _soy; camera.position.z += _soz;
+        camera.rotation.z += _srz;
+      } else {
+        shakeAmp = 0;
+      }
+
       composer.render();
+
+      if (_sox !== 0 || _soy !== 0 || _soz !== 0) {
+        camera.position.x -= _sox; camera.position.y -= _soy; camera.position.z -= _soz;
+        camera.rotation.z -= _srz;
+      }
     }
+    let _lastTsT = -1;
+    let _lastFreezeUi = false;
+    let _lastChScale = 1;
 
     window.addEventListener("resize", () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      composer.setSize(window.innerWidth, window.innerHeight);
-      bloomPass.resolution.set(Math.floor(window.innerWidth / 4), Math.floor(window.innerHeight / 4));
+      applyRenderSize();
     });
 
     resetGame();
