@@ -256,6 +256,7 @@
     #overlay {
       position: fixed;
       inset: 0;
+      z-index: 100; /* above the low-HP pulse (89) and hit indicators (90) */
       display: grid;
       place-items: center;
       background: rgba(9, 12, 18, 0.8);
@@ -434,13 +435,11 @@
     import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
     import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
     import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
     import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
     import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
     // === AUDIO SYSTEM (Web Audio API - procedural gunshot sounds) ===
     let audioCtx = null;
     let audioMaster = null;
-    const AUDIO_POOL_SIZE = 12;
 
     // Master lowpass: sweeps down when time slows, muffling all sound (bullet-time feel)
     let audioLowpass = null;
@@ -455,10 +454,33 @@
       audioLowpass.frequency.value = 19000;
       audioLowpass.Q.value = 0.4;
       audioMaster.connect(audioLowpass);
-      audioLowpass.connect(audioCtx.destination);
+      // Limiter: a dozen overlapping shots plus their shared tail would otherwise clip hard
+      const limiter = audioCtx.createDynamicsCompressor();
+      limiter.threshold.value = -4; limiter.knee.value = 4; limiter.ratio.value = 12; limiter.attack.value = 0.002; limiter.release.value = 0.25;
+      audioLowpass.connect(limiter);
+      limiter.connect(audioCtx.destination);
+      buildGunAudio();
     }
 
+    // Gun takes into AudioBuffers, and the one shared environment reverb every shot sends to
+    function buildGunAudio() {
+      while (renderGunTakes(Infinity));
+      const toBuffer = (x) => { const b = audioCtx.createBuffer(1, x.length, GUN_SR); b.copyToChannel(x, 0); return b; };
+      _gunBuffers = {};
+      for (const id in _gunTakes) { _gunBuffers[id] = { takes: _gunTakes[id].takes.map(toBuffer), mech: _gunTakes[id].mech && toBuffer(_gunTakes[id].mech) }; delete _gunTakes[id]; }
+      const ir = gunSynth.renderIR(GUN_SR, 99), irBuf = audioCtx.createBuffer(2, ir[0].length, GUN_SR);
+      irBuf.copyToChannel(ir[0], 0); irBuf.copyToChannel(ir[1], 1);
+      const conv = audioCtx.createConvolver();
+      conv.buffer = irBuf;
+      _reverbIn = audioCtx.createGain();
+      _reverbIn.connect(conv); conv.connect(audioMaster);
+    }
+
+    // World sounds slow down with the world: 1 at full speed, 0.45 when frozen (lower pitch, longer tail)
+    let _audioRate = 1;
+
     function setAudioTimeScale(t) {
+      _audioRate = 0.45 + 0.55 * THREE.MathUtils.clamp(t, 0, 1);
       if (!audioLowpass) return;
       // t in [0,1]: 0 = frozen (muffled ~350Hz), 1 = full speed (open ~19kHz)
       audioLowpass.frequency.setTargetAtTime(350 * Math.pow(19000 / 350, THREE.MathUtils.clamp(t, 0, 1)), audioCtx.currentTime, 0.04);
@@ -481,21 +503,258 @@
       return buffer;
     }
 
-    // Weapon sound profiles
-    const weaponSoundProfiles = {
-      "player-rifle": { attack: 0.001, decay: 0.08, sustain: 0.04, release: 0.12, filterFreq: 3200, filterQ: 1.2, pitch: 180, pitchDecay: 0.05, gain: 0.7, distortion: 0.3 },
-      "smg":          { attack: 0.001, decay: 0.04, sustain: 0.02, release: 0.06, filterFreq: 4000, filterQ: 1.0, pitch: 220, pitchDecay: 0.03, gain: 0.45, distortion: 0.2 },
-      "battle-rifle": { attack: 0.001, decay: 0.10, sustain: 0.05, release: 0.18, filterFreq: 2500, filterQ: 1.5, pitch: 140, pitchDecay: 0.06, gain: 0.8, distortion: 0.4 },
-      "shotgun":      { attack: 0.001, decay: 0.12, sustain: 0.06, release: 0.25, filterFreq: 1800, filterQ: 0.8, pitch: 100, pitchDecay: 0.08, gain: 0.9, distortion: 0.5 },
-      "sniper":       { attack: 0.001, decay: 0.06, sustain: 0.03, release: 0.35, filterFreq: 5000, filterQ: 2.0, pitch: 250, pitchDecay: 0.04, gain: 1.0, distortion: 0.35 },
-      "rpg":          { attack: 0.005, decay: 0.15, sustain: 0.10, release: 0.40, filterFreq: 800,  filterQ: 0.6, pitch: 60,  pitchDecay: 0.12, gain: 1.0, distortion: 0.6 },
-      "minigun":      { attack: 0.001, decay: 0.03, sustain: 0.01, release: 0.04, filterFreq: 3800, filterQ: 1.0, pitch: 200, pitchDecay: 0.02, gain: 0.4, distortion: 0.2 },
-      "plasma-rifle": { attack: 0.001, decay: 0.06, sustain: 0.08, release: 0.15, filterFreq: 6000, filterQ: 3.0, pitch: 600, pitchDecay: 0.1,  gain: 0.6, distortion: 0.1 },
-      "dual-pistol":  { attack: 0.001, decay: 0.05, sustain: 0.02, release: 0.08, filterFreq: 3600, filterQ: 1.3, pitch: 200, pitchDecay: 0.04, gain: 0.55, distortion: 0.25 },
-      "heavy-cannon": { attack: 0.001, decay: 0.12, sustain: 0.06, release: 0.30, filterFreq: 2000, filterQ: 1.4, pitch: 90,  pitchDecay: 0.09, gain: 1.0, distortion: 0.5 },
-      "grenade-launcher": { attack: 0.002, decay: 0.10, sustain: 0.05, release: 0.22, filterFreq: 1200, filterQ: 0.8, pitch: 75, pitchDecay: 0.10, gain: 0.85, distortion: 0.45 },
-      "railgun":      { attack: 0.001, decay: 0.08, sustain: 0.10, release: 0.45, filterFreq: 7000, filterQ: 2.5, pitch: 700, pitchDecay: 0.15, gain: 0.9, distortion: 0.25 },
-    };
+    // === Gunshot synthesis ===
+    // Each weapon is synthesised once into a few takes, then every shot is a single buffer source (cheap for the
+    // audio thread). The model follows field measurements of real guns (Maher, Routh & Maher 2016, Staab):
+    //  - the muzzle blast is a Friedlander pressure pulse (instant rise, positive phase ~0.3 ms for 9 mm up to
+    //    ~1.2 ms for 12 ga / .50, then a negative phase) plus a 2-5 ms turbulent burst and a short resonant body;
+    //  - at the shooter's ear 63-125 Hz sits 25-33 dB under the peak (0.5-1.5 kHz) while 8-16 kHz is only 7-14 dB
+    //    under it, and the ground bounce arrives a few ms later, almost as strong;
+    //  - the long "boom" is the environment, so it comes from one shared outdoor reverb, not from every take;
+    //  - the shooter, behind the muzzle, hears no supersonic crack of their own round.
+    // Launchers and energy weapons follow the RPG-7 launch sequence (booster bang, motor ignition ~11 m out, roar
+    // falling an octave), the subsonic 40 mm "thump", and common railgun / plasma conventions (Half-Life, DOOM).
+    const GUN_SR = 48000;
+    const gunSynth = (() => {
+      const rng = (seed) => { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; };
+      // RBJ biquad; fc may be a function of time (coefficients refreshed every 32 samples)
+      function biquad(x, type, fc, q, sr) {
+        const y = new Float32Array(x.length); let x1 = 0, x2 = 0, y1 = 0, y2 = 0, b0, b1, b2, a1, a2;
+        const coef = (f) => { const w = 2 * Math.PI * Math.min(f, sr * 0.45) / sr, cw = Math.cos(w), al = Math.sin(w) / (2 * q); let B0, B1, B2;
+          if (type === "lp") { B0 = (1 - cw) / 2; B1 = 1 - cw; B2 = B0; } else if (type === "hp") { B0 = (1 + cw) / 2; B1 = -(1 + cw); B2 = B0; } else { B0 = al; B1 = 0; B2 = -al; }
+          const A0 = 1 + al; b0 = B0 / A0; b1 = B1 / A0; b2 = B2 / A0; a1 = -2 * cw / A0; a2 = (1 - al) / A0; };
+        const fixed = typeof fc === "number"; if (fixed) coef(fc);
+        for (let i = 0; i < x.length; i++) {
+          if (!fixed && i % 32 === 0) coef(fc(i / sr));
+          const v = b0 * x[i] + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = x[i]; y2 = y1; y1 = v; y[i] = v;
+        }
+        return y;
+      }
+      const noise = (n, r) => { const a = new Float32Array(n); for (let i = 0; i < n; i++) a[i] = r() * 2 - 1; return a; };
+      // impulsive envelope: linear rise over atk, then a fast and a slow exponential decay
+      const env = (t, atk, fast, slow, slowLevel) => t < 0 ? 0 : (t < atk ? t / atk : (1 - slowLevel) * Math.exp(-(t - atk) / fast) + slowLevel * Math.exp(-(t - atk) / slow));
+      const softclip = (x, drive) => { const k = Math.tanh(drive); for (let i = 0; i < x.length; i++) x[i] = Math.tanh(x[i] * drive) / k; return x; };
+      const mix = (dst, src, gain, offset = 0) => { for (let i = 0; i < src.length && i + offset < dst.length; i++) dst[i + offset] += src[i] * gain; return dst; };
+      const peakNormalize = (x, peak) => { let m = 0; for (let i = 0; i < x.length; i++) m = Math.max(m, Math.abs(x[i])); const g = m > 0 ? peak / m : 1; for (let i = 0; i < x.length; i++) x[i] *= g; return x; };
+      function friedlander(tau, b, sr, len = tau * 14) {
+        const n = Math.max(4, Math.round(len * sr)), y = new Float32Array(n);
+        for (let i = 0; i < n; i++) { const t = i / sr; y[i] = (1 - t / tau) * Math.exp(-b * t / tau); }
+        return y;
+      }
+      function burstLayer(c, sr, r) {
+        const n = Math.round((c.dur * 5 + 0.002) * sr), x = noise(n, r);
+        for (let i = 0; i < n; i++) x[i] *= env(i / sr, 0.00005, c.dur / 3, c.dur, 0.08);
+        return biquad(biquad(x, "hp", c.hp, 0.707, sr), "lp", c.lp, 0.707, sr);
+      }
+      function bodyLayer(c, sr, r) {
+        const n = Math.round(c.decay * 7 * sr), x = noise(n, r);
+        for (let i = 0; i < n; i++) x[i] *= env(i / sr, 0.0003, c.decay * 0.35, c.decay, 0.35);
+        const y = biquad(x, "bp", c.f, c.q, sr);
+        return c.f2 ? mix(y, biquad(x, "bp", c.f2, c.q2 ?? c.q, sr), c.mix2 ?? 0.6) : y;
+      }
+      function thumpLayer(c, sr) {
+        const n = Math.round(c.dur * 4 * sr), y = new Float32Array(n); let ph = 0;
+        for (let i = 0; i < n; i++) { const t = i / sr, f = c.f1 + (c.f0 - c.f1) * Math.exp(-t / (c.dur * 0.3)); ph += 2 * Math.PI * f / sr; y[i] = Math.sin(ph) * env(t, 0.001, c.dur * 0.4, c.dur, 0.2); }
+        return y;
+      }
+      function clickLayer(k, sr, r) { // metal on metal: a short noise tick through resonant band-passes
+        const m = Math.round((k.dur * 4 + 0.01) * sr), x = noise(m, r);
+        for (let i = 0; i < m; i++) x[i] *= env(i / sr, 0.0003, k.dur * 0.3, k.dur, 0.2);
+        const y = biquad(x, "bp", k.f, k.q, sr);
+        return k.f2 ? mix(y, biquad(x, "bp", k.f2, k.q, sr), 0.7) : y;
+      }
+      function casingLayer(k, sr, r) { // brass (or a shotgun hull) landing and bouncing: short bright rings
+        const m = Math.round(0.35 * sr), y = new Float32Array(m);
+        for (let hit = 0; hit < (k.hits ?? 3); hit++) {
+          const at = Math.round((hit === 0 ? 0 : 0.03 + r() * 0.16) * sr), amp = hit === 0 ? 1 : 0.35 + r() * 0.35;
+          for (const [f, d] of k.modes) { const ff = f * (0.97 + r() * 0.06); for (let i = at; i < m; i++) { const t = (i - at) / sr; y[i] += amp * Math.sin(2 * Math.PI * ff * t) * Math.exp(-t / d) * Math.min(1, t / 0.0002); } }
+        }
+        return y;
+      }
+      function shotInto(out, rc, sr, r, at, amp) {
+        const x = new Float32Array(Math.round(0.4 * sr));
+        if (rc.pulse) mix(x, friedlander(rc.pulse.tau, rc.pulse.b, sr), rc.pulse.level);
+        if (rc.burst) mix(x, burstLayer(rc.burst, sr, r), rc.burst.level);
+        if (rc.body) mix(x, bodyLayer(rc.body, sr, r), rc.body.level);
+        if (rc.thump) mix(x, thumpLayer(rc.thump, sr), rc.thump.level);
+        if (rc.drive) { peakNormalize(x, 1); softclip(x, rc.drive); }
+        mix(out, x, amp, Math.round(at * sr));
+      }
+      const u = { biquad, noise, env, mix, softclip, peakNormalize, friedlander };
+      function renderShot(rc, sr, seed) {
+        const r = rng(seed), n = Math.round(rc.len * sr), out = new Float32Array(n);
+        if (rc.micro) { // minigun: several rounds per take at an audible ~55 Hz, so takes fired back to back fuse into "brrrt"
+          for (let k = 0; k < rc.micro.count; k++) shotInto(out, rc, sr, r, k / rc.micro.rate + (r() - 0.5) * 0.0015, 0.8 + r() * 0.35);
+        } else if (rc.pulse || rc.burst || rc.body || rc.thump) shotInto(out, rc, sr, r, 0, 1);
+        if (rc.extra) rc.extra(out, sr, r, u);
+        let y = out;
+        if (rc.ground) { // ground bounce at the shooter's ear (~7 ms for a 1.6 m ear height), a little darker
+          const d = Math.round(0.007 * sr), lp = biquad(out, "lp", 3000, 0.707, sr); y = new Float32Array(n); y.set(out);
+          for (let i = d; i < n; i++) y[i] += lp[i - d] * rc.ground;
+        }
+        if (rc.hp) y = biquad(y, "hp", rc.hp, 0.707, sr);
+        if (rc.lp) y = biquad(y, "lp", rc.lp, 0.707, sr);
+        const fade = Math.round(0.02 * sr); for (let i = 0; i < fade; i++) y[n - 1 - i] *= i / fade;
+        return peakNormalize(y, 0.95);
+      }
+      // Player-only mechanical track on the shot's time base: bolt, pump, casings, recharge
+      function renderMech(rc, sr, seed) {
+        if (!rc.mech && !rc.mechExtra) return null;
+        const r = rng(seed), out = new Float32Array(Math.round((rc.mechLen ?? rc.len) * sr));
+        for (const k of rc.mech || []) mix(out, k.modes ? casingLayer(k, sr, r) : clickLayer(k, sr, r), k.level, Math.round(k.at * sr));
+        if (rc.mechExtra) rc.mechExtra(out, sr, r, u);
+        return out;
+      }
+      // Arena impulse response (stereo): slap-back from cover 20-60 m away, sparse echoes from farther buildings, and a
+      // tail that darkens as it decays (measured outdoor T60: streets 1.2-1.5 s, forest ~2 s)
+      function renderIR(sr, seed, len = 1.8, rt60 = 1.4) {
+        const r = rng(seed), n = Math.round(len * sr), chans = [];
+        for (let c = 0; c < 2; c++) {
+          const x = new Float32Array(n);
+          for (const [t, g] of [[0.028, 0.42], [0.047, 0.33], [0.071, 0.3], [0.118, 0.26], [0.16, 0.2], [0.205, 0.16], [0.29, 0.12], [0.37, 0.09], [0.52, 0.07], [0.68, 0.05]]) {
+            const i = Math.round(t * (1 + (r() - 0.5) * 0.15) * sr); if (i < n) x[i] += g * (r() < 0.5 ? -1 : 1);
+          }
+          const tau = rt60 / 6.91, pre = 0.02;
+          for (let i = 0; i < n; i++) { const t = i / sr; if (t >= pre) x[i] += (r() * 2 - 1) * 0.22 * Math.min(1, (t - pre) / 0.04) * Math.exp(-(t - pre) / tau); }
+          chans.push(biquad(biquad(x, "lp", (t) => 700 + 6000 * Math.exp(-t / 0.3), 0.707, sr), "hp", 80, 0.707, sr));
+        }
+        return chans;
+      }
+      const brass9 = [[5200, 0.05], [8300, 0.03], [11000, 0.02]], brass556 = [[4300, 0.06], [7100, 0.035], [9800, 0.02]];
+      const steel762 = [[3600, 0.045], [6100, 0.03]], brass50 = [[2100, 0.08], [3700, 0.05], [5600, 0.03]];
+      // len/at in s, frequencies in Hz; gain = relative loudness, jitterDb = shot-to-shot level spread (real 9 mm ~±3 dB,
+      // 5.56 ~±0.6 dB), reverb = send to the shared tail, pan = alternate left/right (dual pistols)
+      const recipes = {
+        "dual-pistol": { len: 0.25, gain: 0.55, jitterDb: 2.5, reverb: 0.3, pan: 0.35,
+          pulse: { tau: 0.00028, b: 1.2, level: 1 }, burst: { dur: 0.003, hp: 500, lp: 15000, level: 0.6 },
+          body: { f: 1500, q: 1.2, decay: 0.012, level: 0.35, f2: 3200, q2: 1.5, mix2: 0.5 },
+          drive: 1.6, ground: 0.5, hp: 180, lp: 17000, mechLen: 0.9, // slide cycling, then the casing lands (~0.55 s)
+          mech: [{ at: 0.018, level: 0.07, f: 3200, f2: 5600, q: 6, dur: 0.008 }, { at: 0.042, level: 0.08, f: 3600, f2: 6200, q: 6, dur: 0.008 },
+                 { at: 0.55, level: 0.05, modes: brass9, hits: 3 }] },
+        "smg": { len: 0.22, gain: 0.5, jitterDb: 2, reverb: 0.25,
+          pulse: { tau: 0.0003, b: 1.2, level: 1 }, burst: { dur: 0.0035, hp: 450, lp: 11000, level: 0.6 },
+          body: { f: 1300, q: 1.1, decay: 0.014, level: 0.4, f2: 2800, q2: 1.4, mix2: 0.5 },
+          drive: 1.7, ground: 0.5, hp: 170, lp: 14000, mechLen: 0.8,
+          mech: [{ at: 0.03, level: 0.07, f: 2600, f2: 4800, q: 5, dur: 0.01 }, { at: 0.5, level: 0.035, modes: brass9, hits: 2 }] },
+        "player-rifle": { len: 0.3, gain: 0.75, jitterDb: 0.6, reverb: 0.45, // 5.56: the sharpest, brightest blast
+          pulse: { tau: 0.0003, b: 1.0, level: 1 }, burst: { dur: 0.0025, hp: 600, lp: 16000, level: 0.8 },
+          body: { f: 1000, q: 0.9, decay: 0.018, level: 0.45, f2: 2800, q2: 1.2, mix2: 0.6 },
+          drive: 2.0, ground: 0.55, hp: 140, lp: 17000, mechLen: 1.0,
+          mech: [{ at: 0.028, level: 0.06, f: 2400, f2: 4600, q: 5, dur: 0.012 }, { at: 0.6, level: 0.045, modes: brass556, hits: 3 }] },
+        "battle-rifle": { len: 0.35, gain: 0.8, jitterDb: 1, reverb: 0.5, // AK: heavier low-mid, piston puff, loose clatter
+          pulse: { tau: 0.00042, b: 1.0, level: 1 }, burst: { dur: 0.003, hp: 500, lp: 16000, level: 0.7 },
+          body: { f: 850, q: 0.8, decay: 0.024, level: 0.6, f2: 2000, q2: 1.0, mix2: 0.5 },
+          extra(out, sr, r, u) {
+            const n = Math.round(0.02 * sr), x = u.noise(n, r); for (let i = 0; i < n; i++) x[i] *= u.env(i / sr, 0.0002, 0.0015, 0.005, 0.1);
+            u.mix(out, u.biquad(u.biquad(x, "hp", 800, 0.707, sr), "lp", 8000, 0.707, sr), 0.28, Math.round(0.0035 * sr)); },
+          drive: 2.2, ground: 0.55, hp: 110, lp: 17000, mechLen: 1.0,
+          mech: [{ at: 0.035, level: 0.08, f: 1900, f2: 3700, q: 4, dur: 0.018 }, { at: 0.062, level: 0.05, f: 2600, f2: 4400, q: 5, dur: 0.01 },
+                 { at: 0.62, level: 0.045, modes: steel762, hits: 2 }] },
+        "heavy-cannon": { len: 0.5, gain: 1.0, jitterDb: 0.8, reverb: 0.75, // .50 BMG: longest pulse of the rifles, brake side blast
+          pulse: { tau: 0.0011, b: 0.9, level: 1 }, burst: { dur: 0.005, hp: 250, lp: 12000, level: 0.75 },
+          body: { f: 500, q: 0.7, decay: 0.04, level: 0.7, f2: 1300, q2: 0.9, mix2: 0.5 },
+          extra(out, sr, r, u) {
+            const n = Math.round(0.03 * sr), x = u.noise(n, r); for (let i = 0; i < n; i++) x[i] *= u.env(i / sr, 0.0002, 0.003, 0.01, 0.15);
+            u.mix(out, u.biquad(u.biquad(x, "hp", 300, 0.707, sr), "lp", 5000, 0.707, sr), 0.5, Math.round(0.0015 * sr)); },
+          drive: 2.6, ground: 0.6, hp: 55, lp: 12000, mechLen: 1.1,
+          mech: [{ at: 0.06, level: 0.12, f: 1300, f2: 2600, q: 4, dur: 0.03 }, { at: 0.75, level: 0.06, modes: brass50, hits: 2 }] },
+        "sniper": { len: 0.45, gain: 1.0, jitterDb: 0.6, reverb: 0.75, // "BOOM-crack"; bolt action: silence, then lift-pull-push-lower
+          pulse: { tau: 0.00055, b: 1.0, level: 1 }, burst: { dur: 0.0035, hp: 400, lp: 17000, level: 0.75 },
+          body: { f: 750, q: 0.8, decay: 0.03, level: 0.6, f2: 1800, q2: 1.0, mix2: 0.5 },
+          thump: { f0: 120, f1: 55, dur: 0.04, level: 0.04 },
+          drive: 2.4, ground: 0.6, hp: 80, lp: 17000, mechLen: 1.5,
+          mech: [{ at: 0.62, level: 0.10, f: 2800, f2: 5200, q: 6, dur: 0.012 }, { at: 0.72, level: 0.09, f: 1800, f2: 3600, q: 3, dur: 0.05 },
+                 { at: 0.95, level: 0.09, f: 2000, f2: 3900, q: 3, dur: 0.045 }, { at: 1.08, level: 0.11, f: 3000, f2: 5600, q: 6, dur: 0.012 },
+                 { at: 1.05, level: 0.05, modes: [[3800, 0.07], [6400, 0.04]], hits: 3 }] },
+        "shotgun": { len: 0.45, gain: 0.95, jitterDb: 1, reverb: 0.7, // 12 ga: longest blast (~5.5 ms), octave peak ~500 Hz, pump
+          pulse: { tau: 0.0012, b: 1.1, level: 1 }, burst: { dur: 0.0055, hp: 200, lp: 8000, level: 0.6 },
+          body: { f: 500, q: 0.7, decay: 0.035, level: 0.85, f2: 900, q2: 0.8, mix2: 0.3 },
+          thump: { f0: 110, f1: 50, dur: 0.05, level: 0.04 },
+          drive: 2.6, ground: 0.6, hp: 70, lp: 11000, mechLen: 1.2,
+          mech: [{ at: 0.4, level: 0.14, f: 1500, f2: 3000, q: 3, dur: 0.06 }, { at: 0.52, level: 0.16, f: 1700, f2: 3300, q: 3, dur: 0.05 },
+                 { at: 0.9, level: 0.05, modes: [[900, 0.03], [1700, 0.02]], hits: 2 }] },
+        "minigun": { len: 0.12, gain: 0.5, jitterDb: 0.8, reverb: 0.3, micro: { count: 5, rate: 5 / 0.09 }, // 7.62 at an audible ~55 Hz
+          pulse: { tau: 0.00045, b: 1.0, level: 1 }, burst: { dur: 0.0025, hp: 600, lp: 14000, level: 0.7 },
+          body: { f: 1000, q: 0.9, decay: 0.012, level: 0.35 },
+          drive: 2.2, ground: 0.5, hp: 150, lp: 15000 },
+        "grenade-launcher": { len: 0.4, gain: 0.75, jitterDb: 1, reverb: 0.35, // subsonic 40 mm: a "thump", no crack; break action
+          pulse: { tau: 0.0025, b: 1.3, level: 0.8 }, burst: { dur: 0.004, hp: 150, lp: 2500, level: 0.3 },
+          body: { f: 420, q: 1.2, decay: 0.03, level: 2.0, f2: 280, q2: 4, mix2: 0.5 },
+          thump: { f0: 120, f1: 45, dur: 0.06, level: 0.8 },
+          drive: 1.4, ground: 0.5, hp: 40, lp: 6000, mechLen: 1.7,
+          mech: [{ at: 0.55, level: 0.1, f: 1500, f2: 2800, q: 4, dur: 0.02 }, { at: 1.45, level: 0.12, f: 1700, f2: 3000, q: 4, dur: 0.02 }] },
+        "rpg": { len: 1.3, gain: 1.0, jitterDb: 0.8, reverb: 0.7, takes: 2,
+          thump: { f0: 70, f1: 35, dur: 0.2, level: 0.8 },
+          extra(out, sr, r, u) {
+            const n = out.length;
+            { const x = u.noise(Math.round(0.5 * sr), r); for (let i = 0; i < x.length; i++) x[i] *= u.env(i / sr, 0.0008, 0.02, 0.1, 0.4); // launch bang
+              u.mix(out, u.softclip(u.peakNormalize(u.biquad(x, "bp", 1400, 0.8, sr), 1), 2.2), 1); }
+            { const x = u.noise(Math.round(1.0 * sr), r); for (let i = 0; i < x.length; i++) x[i] *= u.env(i / sr, 0.003, 0.08, 0.4, 0.5); // back-blast
+              u.mix(out, u.biquad(x, "lp", 400, 0.707, sr), 0.5); }
+            const t0 = 0.15; // motor ignites ~11 m out: a pop, then a roar dropping an octave as it flies off (Doppler)
+            { const x = u.noise(Math.round(0.05 * sr), r); for (let i = 0; i < x.length; i++) x[i] *= u.env(i / sr, 0.0005, 0.008, 0.03, 0.2);
+              u.mix(out, u.biquad(x, "bp", 900, 1, sr), 0.3, Math.round(t0 * sr)); }
+            { const m = n - Math.round(t0 * sr), x = u.noise(m, r);
+              for (let i = 0; i < m; i++) { const t = i / sr; x[i] *= Math.min(1, t / 0.06) / (1 + t * 6) * (0.75 + 0.25 * Math.sin(2 * Math.PI * 9 * t + r() * 0.3)) * Math.exp(-Math.max(0, t - 0.55) / 0.12); }
+              const drop = (t) => Math.pow(0.5, Math.min(1, t / 0.55));
+              let y = u.biquad(x, "bp", (t) => 1800 * drop(t), 0.9, sr);
+              for (const h of [1, 3, 5, 7]) y = u.mix(y, u.biquad(x, "bp", (t) => 190 * h * drop(t), 6, sr), 0.5 / h);
+              u.mix(out, y, 0.65, Math.round(t0 * sr)); } },
+          ground: 0.4, hp: 35, lp: 12000 },
+        "plasma-rifle": { len: 0.35, gain: 0.6, jitterDb: 1, pitchJitter: 0.04, reverb: 0.3,
+          extra(out, sr, r, u) {
+            const n = Math.min(out.length, Math.round(0.3 * sr));
+            { const x = u.noise(Math.round(0.004 * sr), r); for (let i = 0; i < x.length; i++) x[i] *= u.env(i / sr, 0.0001, 0.0007, 0.002, 0.1); u.mix(out, u.biquad(x, "hp", 1500, 0.707, sr), 0.5); }
+            let ph = 0; const pew = new Float32Array(n); // "pew": exponential dive 2.5 kHz -> 250 Hz (a dispersion chirp)
+            for (let i = 0; i < n; i++) { const t = i / sr, f = 250 + 2250 * Math.exp(-t / 0.04); ph = (ph + f / sr) % 1; pew[i] = (4 * Math.abs(ph - 0.5) - 1) * u.env(t, 0.001, 0.05, 0.12, 0.25); }
+            u.mix(out, pew, 0.8);
+            const m = Math.round(0.1 * sr), z = u.noise(m, r); let gate = 1, sp = 0; // "zap": gated crackle + a saturated 120 Hz saw
+            for (let i = 0; i < m; i++) { if (i % 96 === 0) gate = r() < 0.45 ? 1 : 0.1; z[i] *= gate * u.env(i / sr, 0.0005, 0.03, 0.08, 0.2); }
+            u.mix(out, u.biquad(z, "bp", 3500, 1.2, sr), 0.5);
+            const saw = new Float32Array(m); for (let i = 0; i < m; i++) { sp = (sp + 120 / sr) % 1; saw[i] = Math.tanh(3 * (2 * sp - 1)) * u.env(i / sr, 0.001, 0.03, 0.08, 0.2); }
+            u.mix(out, u.biquad(saw, "lp", 3000, 0.707, sr), 0.35);
+            let pb = 0; const bolt = new Float32Array(Math.round(0.14 * sr));
+            for (let i = 0; i < bolt.length; i++) { const t = i / sr, f = 150 + 250 * Math.exp(-t / 0.04); pb += 2 * Math.PI * f / sr; bolt[i] = Math.sin(pb) * u.env(t, 0.001, 0.04, 0.1, 0.2); }
+            u.mix(out, bolt, 0.35); },
+          ground: 0.3, hp: 90, lp: 14000 },
+        "railgun": { len: 1.1, gain: 0.95, jitterDb: 0.5, reverb: 0.75, takes: 2,
+          extra(out, sr, r, u) {
+            const n = out.length, o = Math.round(0.045 * sr); // a 5 ms pre-transient, 40 ms of silence, then the discharge
+            { const x = u.noise(Math.round(0.006 * sr), r); for (let i = 0; i < x.length; i++) x[i] *= u.env(i / sr, 0.0002, 0.0015, 0.004, 0.1); u.mix(out, u.biquad(x, "hp", 2000, 0.707, sr), 0.6); }
+            { const x = u.noise(Math.round(0.25 * sr), r); for (let i = 0; i < x.length; i++) x[i] *= u.env(i / sr, 0.0005, 0.012, 0.04, 0.2); u.mix(out, u.biquad(x, "hp", 2000, 0.707, sr), 1.0, o); }
+            u.mix(out, u.friedlander(0.0006, 1.0, sr), 0.8, o);
+            { let ph = 0; const b = new Float32Array(Math.round(0.9 * sr));
+              for (let i = 0; i < b.length; i++) { const t = i / sr, f = 30 + 50 * Math.exp(-t / 0.08); ph += 2 * Math.PI * f / sr; b[i] = Math.sin(ph) * u.env(t, 0.001, 0.1, 0.3, 0.3); } u.mix(out, b, 0.45, o); }
+            { const m = Math.round(0.11 * sr), x = u.noise(m, r); let g = 1; // arcing: a random pulse train, 3-6 kHz
+              for (let i = 0; i < m; i++) { if (i % 64 === 0) g = r() < 0.4 ? 1 : 0; x[i] *= g * u.env(i / sr, 0.0003, 0.04, 0.1, 0.2); } u.mix(out, u.biquad(x, "bp", 4500, 1.5, sr), 0.4, o); }
+            { const ring = new Float32Array(n - o), parts = Array.from({ length: 7 }, () => [800 + r() * 4200, 0.4 + r() * 0.5]); // metallic ring
+              for (let i = 0; i < ring.length; i++) { const t = i / sr; let s = 0; for (const [f, d] of parts) s += Math.sin(2 * Math.PI * f * t) * Math.exp(-t / d); ring[i] = s / 7 * Math.min(1, t / 0.001); }
+              u.mix(out, ring, 0.2, o); }
+            for (let k = 0; k < 9; k++) { const x = u.noise(Math.round(0.004 * sr), r); for (let i = 0; i < x.length; i++) x[i] *= u.env(i / sr, 0.0001, 0.0008, 0.002, 0.1); // static crackle
+              u.mix(out, u.biquad(x, "bp", 5000, 2, sr), 0.1 * (0.5 + r()), Math.round((0.3 + r() * 0.5) * sr)); } },
+          ground: 0.45, hp: 40, lp: 16000, mechLen: 3.0,
+          mechExtra(out, sr, r, u) { // recharge whine over the 3 s cooldown (pitch x2.5 like Half-Life's gauss), then a ready ping
+            const s0 = Math.round(0.35 * sr), s1 = Math.round(2.75 * sr); let ph = 0, ph2 = 0, tp = 0;
+            for (let i = s0; i < s1; i++) { const t = (i - s0) / (s1 - s0), f = 150 * Math.pow(2.5, t), trem = 0.6 + 0.4 * Math.sin(tp); tp += 2 * Math.PI * (4 + 12 * t) / sr;
+              ph = (ph + f / sr) % 1; ph2 += 2 * Math.PI * f * 2 / sr; out[i] += (0.6 * (2 * ph - 1) + 0.4 * Math.sin(ph2)) * trem * 0.07 * Math.min(1, t * 8) * Math.min(1, (1 - t) * 30); }
+            let pp = 0; for (let i = s1; i < Math.min(out.length, s1 + Math.round(0.08 * sr)); i++) { pp += 2 * Math.PI * 1800 / sr; out[i] += Math.sin(pp) * 0.07 * Math.exp(-(i - s1) / sr / 0.025); } } }
+      };
+      return { recipes, renderShot, renderMech, renderIR };
+    })();
+
+    // Takes are rendered in small slices while the start screen is up, so neither the page load nor the first click
+    // stalls on it; initAudio finishes whatever is left.
+    const _gunTakes = {}, _gunQueue = Object.keys(gunSynth.recipes);
+    function renderGunTakes(budgetMs) {
+      const t0 = performance.now();
+      while (_gunQueue.length && performance.now() - t0 < budgetMs) {
+        const id = _gunQueue.shift(), rc = gunSynth.recipes[id], takes = [];
+        for (let k = 0; k < (rc.takes ?? 3); k++) takes.push(gunSynth.renderShot(rc, GUN_SR, 1000 + id.length * 97 + k * 131));
+        _gunTakes[id] = { takes, mech: gunSynth.renderMech(rc, GUN_SR, 7000 + id.length * 13) };
+      }
+      return _gunQueue.length > 0;
+    }
+    (function renderGunTakesIdle() { if (renderGunTakes(8)) setTimeout(renderGunTakesIdle, 16); })();
 
     let _noiseBuffer = null;
     function getNoiseBuffer() {
@@ -506,16 +765,19 @@
     // Create distortion curve for waveshaper.
     // Cached by amount: this used to allocate a fresh 44100-float array per shot,
     // which produced megabytes of garbage per second under automatic fire.
+    // Odd length with the middle sample at x = 0 exactly: silence then maps to 0, so Chromium gives each
+    // WaveShaper a zero tail and frees it after the shot. With 44100 samples curve(0) was slightly off
+    // zero and every shaper kept running until GC, up to a whole CPU core under heavy fire.
     const _distortionCurveCache = new Map();
     function makeDistortionCurve(amount) {
       const cached = _distortionCurveCache.get(amount);
       if (cached) return cached;
-      const samples = 44100;
+      const samples = 1025;
       const curve = new Float32Array(samples);
       const deg = Math.PI / 180;
       const k = amount * 100;
       for (let i = 0; i < samples; i++) {
-        const x = (i * 2) / samples - 1;
+        const x = (i * 2) / (samples - 1) - 1;
         curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
       }
       _distortionCurveCache.set(amount, curve);
@@ -527,69 +789,62 @@
     const MAX_CONCURRENT_GUNSHOTS = 10;
     let _activeGunSounds = 0;
 
-    function playGunSound(weaponId, volume = 1.0) {
-      if (!audioCtx) return;
-      if (volume < 0.1 || _activeGunSounds >= MAX_CONCURRENT_GUNSHOTS) return;
+    // dist > 0: an enemy shot `dist` m away (air absorption darkens it, the reverb carries relatively more of it);
+    // pan: -1 left .. 1 right. The player's own gun (dist 0) always sounds and adds its mechanical track.
+    let _gunBuffers = null, _reverbIn = null, _gunPanSide = 1, _whine = null;
+    function playGunSound(weaponId, volume = 1.0, dist = 0, pan = 0) {
+      if (!audioCtx || !_gunBuffers) return;
+      const own = dist === 0;
+      if (volume < 0.1 || (!own && _activeGunSounds >= MAX_CONCURRENT_GUNSHOTS)) return;
       ensureAudio();
-
-      const prof = weaponSoundProfiles[weaponId] || weaponSoundProfiles["player-rifle"];
+      const rc = gunSynth.recipes[weaponId] || gunSynth.recipes["player-rifle"], snd = _gunBuffers[weaponId] || _gunBuffers["player-rifle"];
       const now = audioCtx.currentTime;
-      const totalDuration = prof.attack + prof.decay + prof.sustain + prof.release;
+      const src = audioCtx.createBufferSource();
+      src.buffer = snd.takes[(Math.random() * snd.takes.length) | 0];
+      // slow motion lowers pitch and stretches time together, like before; every shot also varies slightly
+      src.playbackRate.value = _audioRate * (1 + (Math.random() * 2 - 1) * (rc.pitchJitter ?? 0.02));
+      let head = src;
+      if (dist > 5) { // one low-pass fitted to ISO 9613-1 air absorption: ~7 kHz at 50 m
+        const lp = audioCtx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = Math.min(18000, 7000 * Math.sqrt(50 / dist));
+        src.connect(lp); head = lp;
+      }
+      if (rc.pan && own) pan = (_gunPanSide = -_gunPanSide) * rc.pan; // two guns: left, right, left...
+      const out = audioCtx.createGain();
+      out.gain.value = rc.gain * volume * Math.pow(10, (Math.random() * 2 - 1) * (rc.jitterDb ?? 1) / 20);
+      if (pan) { const p = audioCtx.createStereoPanner(); p.pan.value = pan; head.connect(p); p.connect(out); } else head.connect(out);
+      out.connect(audioMaster);
+      // far away the direct sound fades faster than the reverberation around it
+      const send = audioCtx.createGain(); send.gain.value = rc.gain * rc.reverb * Math.pow(volume, 0.4);
+      head.connect(send); send.connect(_reverbIn);
+      // unhook the chain as soon as its last source ends instead of leaving it to the garbage collector
+      let pending = 1;
+      const done = () => { if (--pending === 0) { out.disconnect(); send.disconnect(); } };
+      if (own && snd.mech) { const m = audioCtx.createBufferSource(); m.buffer = snd.mech; m.playbackRate.value = _audioRate; m.connect(out); m.onended = done; pending++; m.start(now); }
+      if (own && weaponId === "minigun") minigunWhine(now);
+      if (!own) _activeGunSounds++;
+      src.onended = () => { if (!own) _activeGunSounds = Math.max(0, _activeGunSounds - 1); done(); };
+      src.start(now);
+    }
 
-      // Layer 1: Noise burst (gunshot crack)
-      const noiseSource = audioCtx.createBufferSource();
-      noiseSource.buffer = getNoiseBuffer();
+    // Minigun motor: spins up (~0.5 s) while the trigger is held, winds down (~0.25 s) after the last round (M134 data)
+    function minigunWhine(now) {
+      if (!_whine || now > _whine.end) {
+        const o = audioCtx.createOscillator(), f = audioCtx.createBiquadFilter(), g = audioCtx.createGain();
+        o.type = "sawtooth"; o.frequency.value = 110 * _audioRate; f.type = "lowpass"; f.frequency.value = 1400; g.gain.value = 0;
+        o.connect(f); f.connect(g); g.connect(audioMaster); o.start(now);
+        _whine = { o, g, end: 0 };
+      }
+      const o = _whine.o, g = _whine.g, r = _audioRate;
+      o.frequency.cancelScheduledValues(now); o.frequency.setTargetAtTime(220 * r, now, 0.17);
+      g.gain.cancelScheduledValues(now); g.gain.setTargetAtTime(0.045, now, 0.06);
+      o.frequency.setTargetAtTime(110 * r, now + 0.12, 0.08); g.gain.setTargetAtTime(0, now + 0.12, 0.07);
+      _whine.end = now + 0.8; o.stop(_whine.end); // the node ends itself once idle; the next burst makes a new one
+    }
 
-      const noiseFilter = audioCtx.createBiquadFilter();
-      noiseFilter.type = "bandpass";
-      noiseFilter.frequency.setValueAtTime(prof.filterFreq, now);
-      noiseFilter.frequency.exponentialRampToValueAtTime(prof.filterFreq * 0.3, now + totalDuration);
-      noiseFilter.Q.value = prof.filterQ;
-
-      const noiseGain = audioCtx.createGain();
-      noiseGain.gain.setValueAtTime(0, now);
-      noiseGain.gain.linearRampToValueAtTime(prof.gain * volume, now + prof.attack);
-      noiseGain.gain.linearRampToValueAtTime(prof.gain * volume * 0.5, now + prof.attack + prof.decay);
-      noiseGain.gain.linearRampToValueAtTime(prof.gain * volume * 0.15, now + prof.attack + prof.decay + prof.sustain);
-      noiseGain.gain.linearRampToValueAtTime(0, now + totalDuration);
-
-      // Layer 2: Low-frequency punch (body of the shot)
-      const osc = audioCtx.createOscillator();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(prof.pitch, now);
-      osc.frequency.exponentialRampToValueAtTime(Math.max(30, prof.pitch * 0.15), now + prof.pitchDecay + 0.1);
-
-      const oscGain = audioCtx.createGain();
-      oscGain.gain.setValueAtTime(prof.gain * volume * 0.6, now);
-      oscGain.gain.exponentialRampToValueAtTime(0.001, now + prof.pitchDecay + 0.12);
-
-      // Distortion for grit
-      const distortion = audioCtx.createWaveShaper();
-      distortion.curve = makeDistortionCurve(prof.distortion);
-      distortion.oversample = "2x";
-
-      // High-pass to remove mud
-      const hiPass = audioCtx.createBiquadFilter();
-      hiPass.type = "highpass";
-      hiPass.frequency.value = 60;
-
-      // Connect noise chain
-      noiseSource.connect(noiseFilter);
-      noiseFilter.connect(distortion);
-      distortion.connect(noiseGain);
-      noiseGain.connect(hiPass);
-      hiPass.connect(audioMaster);
-
-      // Connect oscillator chain
-      osc.connect(oscGain);
-      oscGain.connect(audioMaster);
-
-      _activeGunSounds++;
-      noiseSource.onended = () => { _activeGunSounds = Math.max(0, _activeGunSounds - 1); };
-      noiseSource.start(now);
-      noiseSource.stop(now + totalDuration + 0.05);
-      osc.start(now);
-      osc.stop(now + prof.pitchDecay + 0.15);
+    // Stereo position of a sound source relative to where the camera looks (-1 left .. 1 right)
+    function panFor(p) {
+      const dx = p.x - camera.position.x, dz = p.z - camera.position.z, d = Math.hypot(dx, dz) || 1;
+      return 0.8 * (dx * Math.cos(yaw) - dz * Math.sin(yaw)) / d;
     }
 
     function playExplosionSound(volume = 1.0) {
@@ -597,29 +852,31 @@
       ensureAudio();
 
       const now = audioCtx.currentTime;
+      const r = _audioRate, k = 1 / r; // slowed with the world, like the gunshots
 
       // Deep rumble
       const osc = audioCtx.createOscillator();
       osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(50, now);
-      osc.frequency.exponentialRampToValueAtTime(20, now + 0.5);
+      osc.frequency.setValueAtTime(50 * r, now);
+      osc.frequency.exponentialRampToValueAtTime(20 * r, now + 0.5 * k);
       const oscGain = audioCtx.createGain();
       oscGain.gain.setValueAtTime(volume * 0.7, now);
-      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8 * k);
       osc.connect(oscGain);
       oscGain.connect(audioMaster);
 
       // Noise layer
       const noiseSource = audioCtx.createBufferSource();
       noiseSource.buffer = getNoiseBuffer();
+      noiseSource.playbackRate.value = r;
       const nFilter = audioCtx.createBiquadFilter();
       nFilter.type = "lowpass";
-      nFilter.frequency.setValueAtTime(2000, now);
-      nFilter.frequency.exponentialRampToValueAtTime(200, now + 0.6);
+      nFilter.frequency.setValueAtTime(2000 * r, now);
+      nFilter.frequency.exponentialRampToValueAtTime(200 * r, now + 0.6 * k);
       const nGain = audioCtx.createGain();
       nGain.gain.setValueAtTime(volume * 0.9, now);
-      nGain.gain.linearRampToValueAtTime(volume * 0.4, now + 0.15);
-      nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+      nGain.gain.linearRampToValueAtTime(volume * 0.4, now + 0.15 * k);
+      nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8 * k);
 
       const distortion = audioCtx.createWaveShaper();
       distortion.curve = makeDistortionCurve(0.7);
@@ -631,9 +888,9 @@
       nGain.connect(audioMaster);
 
       osc.start(now);
-      osc.stop(now + 0.85);
+      osc.stop(now + 0.85 * k);
       noiseSource.start(now);
-      noiseSource.stop(now + 0.85);
+      noiseSource.stop(now + 0.85 * k);
     }
 
     function playHitSound(volume = 0.5) {
@@ -656,6 +913,9 @@
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x151f2f);
     scene.fog = new THREE.Fog(0x151f2f, 120, 1080);
+    // The root never moves. Left on auto-update it forces every descendant's world matrix each
+    // frame, which silently defeated all the matrixWorldAutoUpdate = false pruning below.
+    scene.matrixAutoUpdate = false;
 
     const BASE_FOV = 75;
     const SNIPER_SCOPE_FOV = 16;
@@ -673,18 +933,31 @@
     document.body.appendChild(renderer.domElement);
 
     const composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene, camera));
+    // No automatic clears: scene.background clears the scene target and every later pass overwrites its
+    // whole target, so those clears were ~1.6 ms of wasted GPU per frame
+    renderer.autoClear = false;
+    const renderPass = new RenderPass(scene, camera);
+    renderPass.clear = false;
+    composer.addPass(renderPass);
     const bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.4, 0.35, 0.85);
     composer.addPass(bloomPass);
+    // The grade pass adds the bloom (tBloom) instead of this full-resolution additive blend pass
+    bloomPass.blendMaterial.visible = false;
 
-    // Bullet-time color grading: vignette + cool desaturation + edge chromatic
-    // aberration, all driven by how slow time currently is. One cheap fullscreen
-    // pass at the (adaptively scaled) render resolution.
+    // Bullet-time grading: vignette + edge chromatic aberration driven by how slow time
+    // currently is; a freeze also cools and desaturates. One cheap fullscreen pass at the
+    // (adaptively scaled) render resolution.
+    // It also ends the HDR chain: three only applies tone mapping + sRGB when drawing
+    // straight to screen, and doing it here instead of in an OutputPass saves one
+    // full-screen pass (~1.8 ms GPU on an Iris Xe).
     const gradePass = new ShaderPass({
       uniforms: {
         tDiffuse: { value: null },
+        tBloom: { value: null },
         uSlow: { value: 0 },
-        uFreeze: { value: 0 }
+        uFreeze: { value: 0 },
+        uPulse: { value: 0 },
+        toneMappingExposure: { value: renderer.toneMappingExposure }
       },
       vertexShader: `
         varying vec2 vUv;
@@ -695,42 +968,55 @@
       `,
       fragmentShader: `
         uniform sampler2D tDiffuse;
+        uniform sampler2D tBloom;
         uniform float uSlow;
         uniform float uFreeze;
+        uniform float uPulse;
+        #include <tonemapping_pars_fragment>
         varying vec2 vUv;
         void main() {
           vec2 c = vUv - 0.5;
           float r2 = dot(c, c);
+          vec2 uv = vUv;
+          // Time ripple: a refraction ring runs out from the centre as a freeze starts
+          if (uPulse > 0.0) {
+            float rr = sqrt(r2);
+            float ring = exp(-pow((rr - uPulse * 0.8) / 0.06, 2.0)) * (1.0 - uPulse);
+            uv -= c / max(rr, 1e-4) * ring * 0.02;
+          }
           vec2 caOff = c * ((uSlow * 0.55 + uFreeze) * 0.040 * r2);
           vec3 col;
-          col.r = texture2D(tDiffuse, vUv + caOff).r;
-          col.g = texture2D(tDiffuse, vUv).g;
-          col.b = texture2D(tDiffuse, vUv - caOff).b;
+          col.r = texture2D(tDiffuse, uv + caOff).r;
+          col.g = texture2D(tDiffuse, uv).g;
+          col.b = texture2D(tDiffuse, uv - caOff).b;
+          // Bloom with the same colour split; rgb * a is what the bloom pass's additive blend used to add
+          vec4 b0 = texture2D(tBloom, uv + caOff), b1 = texture2D(tBloom, uv), b2 = texture2D(tBloom, uv - caOff);
+          col += vec3(b0.r * b0.a, b1.g * b1.a, b2.b * b2.a);
           float lum = dot(col, vec3(0.299, 0.587, 0.114));
-          // Cool grade keeps most of the original color; the scene is already
-          // dark, so grading must never crush overall brightness.
+          // Only a freeze drains colour towards a cool grey: doing it in plain slow motion
+          // pulled the blue scene towards grey, which read as a red cast
           vec3 cool = mix(vec3(lum), vec3(lum) * vec3(0.84, 0.97, 1.18), 0.8);
-          col = mix(col, cool, uSlow * 0.28 + uFreeze * 0.18);
+          col = mix(col, cool, uFreeze * 0.18);
           col = mix(col, col * vec3(0.78, 0.94, 1.28) + vec3(0.0, 0.015, 0.05), uFreeze * 0.4);
           // Edge-only vignette: zero effect inside r2 < 0.10 (the whole center),
           // ramping up only toward corners (r2 max = 0.5).
           float edge = smoothstep(0.10, 0.52, r2);
           col *= 1.0 - edge * (0.14 + uSlow * 0.28 + uFreeze * 0.20);
-          gl_FragColor = vec4(col, 1.0);
+          gl_FragColor = sRGBTransferOETF(vec4(ACESFilmicToneMapping(col), 1.0));
         }
       `
     });
     composer.addPass(gradePass);
-    // CRITICAL: three only applies tone mapping (ACES) + sRGB output encoding
-    // when rendering directly to screen. Inside an EffectComposer everything
-    // targets intermediate buffers, so without this pass the canvas receives
-    // raw linear values and the whole game looks crushed-dark.
-    composer.addPass(new OutputPass());
+    // Set after construction: ShaderPass drops render-target textures when it clones its uniforms
+    gradePass.uniforms.tBloom.value = bloomPass.renderTargetsHorizontal[0].texture;
+    // It tone-maps itself: if it ever becomes the last pass, three must not inject its own tone mapping too
+    gradePass.material.toneMapped = false;
     // FXAA on the final image: the renderer runs without MSAA at pixel ratio 1
     const fxaaPass = new ShaderPass(FXAAShader);
     composer.addPass(fxaaPass);
     let _gradeSlow = 0;
     let _gradeFreeze = 0;
+    let _pulse = 0, _prevFreeze = false; // time-ripple state
 
     // Dynamic resolution: the render buffer is capped near 1440p worth of pixels
     // (a 4K canvas is fill-rate bound) and adapts at runtime to hold ~60fps.
@@ -789,15 +1075,17 @@
     wall4.matrixAutoUpdate = false; wall4.updateMatrix();
     scene.add(wall1, wall2, wall3, wall4);
 
+    // 800 stars on a dome above the horizon. The old cube scatter left ~96% of them
+    // under the floor or past the fog's far plane, so the sky showed almost none.
+    const starPos = new Float32Array(800 * 3);
+    for (let i = 0; i < 800; i++) {
+      const a = Math.random() * Math.PI * 2, h = 0.08 + Math.random() * 0.92; // h = sin(elevation)
+      const c = Math.sqrt(1 - h * h);
+      starPos[i * 3] = Math.cos(a) * c * 1000; starPos[i * 3 + 1] = h * 1000; starPos[i * 3 + 2] = Math.sin(a) * c * 1000;
+    }
     const stars = new THREE.Points(
-      new THREE.BufferGeometry().setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(
-          Array.from({ length: 2400 }, () => (Math.random() - 0.5) * arena * 14),
-          3
-        )
-      ),
-      new THREE.PointsMaterial({ size: 0.24, color: 0xa3b8d8, transparent: true, opacity: 0.45 })
+      new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(starPos, 3)),
+      new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, color: 0xa3b8d8, transparent: true, opacity: 0.55, fog: false })
     );
     stars.matrixAutoUpdate = false;
     stars.updateMatrix();
@@ -859,6 +1147,7 @@
     const freezeBannerEl = document.getElementById("freeze-banner");
     let _lastPromptWeapon = null;
     let _lastFreezeReady = false;
+    let _freezeBannerTimer = 0, _bannerCharge = 0;
     let hitMarkerTimer = 0;
 
     function showHitMarker(kill) {
@@ -928,6 +1217,7 @@
     let yaw = 0;
     let pitch = 0;
     let mouseDown = false;
+    let queuedShot = false; // a semi-auto click made just before the cooldown ran out
     let isAiming = false;
     let gameOver = false;
     let paused = false;
@@ -972,24 +1262,24 @@
     // Realistic bullet proportions per weapon type
     const BULLET_SHAPES = {
       // 5.56×45mm NATO — slim spitzer, medium case
-      "player-rifle": { bodyR1: 0.028, bodyR2: 0.028, bodyH: 0.18, tipR: 0.028, tipH: 0.22, casingR: 0.038, casingH: 0.22, bandR: 0.030 },
+      "player-rifle": { bodyR1: 0.028, bodyR2: 0.028, bodyH: 0.18, tipR: 0.028, tipH: 0.22, casingR: 0.038, casingH: 0.22 },
       // 9×19mm Parabellum — short round-nose, wide stubby case
-      "smg":          { bodyR1: 0.032, bodyR2: 0.032, bodyH: 0.10, tipR: 0.030, tipH: 0.08, casingR: 0.038, casingH: 0.12, bandR: 0.034 },
+      "smg":          { bodyR1: 0.032, bodyR2: 0.032, bodyH: 0.10, tipR: 0.030, tipH: 0.08, casingR: 0.038, casingH: 0.12 },
       // 7.62×51mm NATO — bigger spitzer, longer case
-      "battle-rifle": { bodyR1: 0.032, bodyR2: 0.032, bodyH: 0.22, tipR: 0.032, tipH: 0.28, casingR: 0.044, casingH: 0.28, bandR: 0.035 },
+      "battle-rifle": { bodyR1: 0.032, bodyR2: 0.032, bodyH: 0.22, tipR: 0.032, tipH: 0.28, casingR: 0.044, casingH: 0.28 },
       // .50 BMG 12.7×99mm — massive round, very long
-      "heavy-cannon": { bodyR1: 0.048, bodyR2: 0.048, bodyH: 0.30, tipR: 0.046, tipH: 0.38, casingR: 0.062, casingH: 0.42, bandR: 0.052 },
+      "heavy-cannon": { bodyR1: 0.048, bodyR2: 0.048, bodyH: 0.30, tipR: 0.046, tipH: 0.38, casingR: 0.062, casingH: 0.42 },
       // 12ga slug — wide flat-nose, fat plastic hull
-      "shotgun":      { bodyR1: 0.046, bodyR2: 0.046, bodyH: 0.10, tipR: 0.040, tipH: 0.04, casingR: 0.050, casingH: 0.28, bandR: 0.048 },
+      "shotgun":      { bodyR1: 0.046, bodyR2: 0.046, bodyH: 0.10, tipR: 0.040, tipH: 0.04, casingR: 0.050, casingH: 0.28 },
       // .338 Lapua Magnum — long sleek boat-tail
-      "sniper":       { bodyR1: 0.030, bodyR2: 0.026, bodyH: 0.26, tipR: 0.030, tipH: 0.34, casingR: 0.046, casingH: 0.30, bandR: 0.032 },
+      "sniper":       { bodyR1: 0.030, bodyR2: 0.026, bodyH: 0.26, tipR: 0.030, tipH: 0.34, casingR: 0.046, casingH: 0.30 },
       // RPG-7 warhead — wide ogive warhead, thin rocket tube, fins
-      "rpg":          { bodyR1: 0.10,  bodyR2: 0.045, bodyH: 0.32, tipR: 0.10,  tipH: 0.30, casingR: 0.045, casingH: 0.50, bandR: 0.08 },
-      "minigun":          { bodyR1: 0.024, bodyR2: 0.024, bodyH: 0.12, tipR: 0.024, tipH: 0.14, casingR: 0.032, casingH: 0.16, bandR: 0.026 },
-      "plasma-rifle":     { bodyR1: 0.035, bodyR2: 0.035, bodyH: 0.16, tipR: 0.035, tipH: 0.20, casingR: 0.042, casingH: 0.22, bandR: 0.037 },
-      "grenade-launcher": { bodyR1: 0.08,  bodyR2: 0.06,  bodyH: 0.24, tipR: 0.08,  tipH: 0.16, casingR: 0.055, casingH: 0.30, bandR: 0.065 },
-      "dual-pistol":      { bodyR1: 0.028, bodyR2: 0.028, bodyH: 0.10, tipR: 0.026, tipH: 0.10, casingR: 0.034, casingH: 0.14, bandR: 0.030 },
-      "railgun":          { bodyR1: 0.022, bodyR2: 0.018, bodyH: 0.30, tipR: 0.022, tipH: 0.40, casingR: 0.036, casingH: 0.35, bandR: 0.024 }
+      "rpg":          { bodyR1: 0.10,  bodyR2: 0.045, bodyH: 0.32, tipR: 0.10,  tipH: 0.30, casingR: 0.045, casingH: 0.50 },
+      "minigun":          { bodyR1: 0.024, bodyR2: 0.024, bodyH: 0.12, tipR: 0.024, tipH: 0.14, casingR: 0.032, casingH: 0.16 },
+      "plasma-rifle":     { bodyR1: 0.035, bodyR2: 0.035, bodyH: 0.16, tipR: 0.035, tipH: 0.20, casingR: 0.042, casingH: 0.22 },
+      "grenade-launcher": { bodyR1: 0.08,  bodyR2: 0.06,  bodyH: 0.24, tipR: 0.08,  tipH: 0.16, casingR: 0.055, casingH: 0.30 },
+      "dual-pistol":      { bodyR1: 0.028, bodyR2: 0.028, bodyH: 0.10, tipR: 0.026, tipH: 0.10, casingR: 0.034, casingH: 0.14 },
+      "railgun":          { bodyR1: 0.022, bodyR2: 0.018, bodyH: 0.30, tipR: 0.022, tipH: 0.40, casingR: 0.036, casingH: 0.35 }
     };
     // Tip = bullet ogive (copper FMJ jacket), Body = bullet shank
     const BULLET_TIP_COLORS = {
@@ -1006,7 +1296,6 @@
       "dual-pistol": 0xc09850, "railgun": 0x8844cc
     };
     const BULLET_CASING_COLOR = 0xc5a846;
-    const bulletCollisionEffects = [];
 
     const GUN_FORWARD = new THREE.Vector3(0, 0, -1);
     const GUN_MUZZLE_LOCAL = new THREE.Vector3(0, -0.01, -0.62);
@@ -1036,7 +1325,6 @@
     const tempVec4 = new THREE.Vector3();
     const tempQuat1 = new THREE.Quaternion();
     const tempQuat2 = new THREE.Quaternion();
-    const tempQuat3 = new THREE.Quaternion();
     const UP_AXIS = new THREE.Vector3(0, 1, 0);
     const AIM_PLAYER_OFFSET = new THREE.Vector3(0, -0.1, 0);
 
@@ -1209,7 +1497,7 @@
         mode: "semi",
         shotInterval: 1.05,
         speed: 20,
-        damage: 8,
+        damage: 12, // per pellet: a close blast (10 pellets) kills now that one head pellet no longer does
         pellets: 10,
         penetration: 1,
         penetrationLoss: 0.78,
@@ -1519,7 +1807,6 @@
       return PLAYER_WEAPON;
     }
 
-    const impactEffects = [];
     const dissolveEffects = [];
     const muzzleEffects = [];
     const obstacles = [];
@@ -1555,16 +1842,19 @@
       for (let i = 0; i < obstacles.length; i++) obsGridInsert(i);
     }
 
-    // Returns a reused array (never iterate with for..of — index it).
+    // Returns a reused array holding _obsNearbyN entries (index it up to that count, never .length
+    // or for..of: entries past it are stale). Truncating with length = 0 made V8 drop the backing
+    // store, so every query re-allocated it.
     // Dedup via per-query epoch mark on the obstacle instead of a Set,
     // so queries allocate nothing. Obstacles register into every cell they
     // touch, so a span of ceil(extra/cell) is sufficient (was +1 extra ring).
+    let _obsNearbyN = 0;
     function getObsNearby(x, z, extra) {
       const gx = obsGridCoord(x);
       const gz = obsGridCoord(z);
       const span = Math.max(1, Math.ceil(extra / OBS_GRID_CELL));
       const result = _obsNearbyList;
-      result.length = 0;
+      let n = 0;
       _obsQueryId++;
       for (let dx = -span; dx <= span; dx++) {
         for (let dz = -span; dz <= span; dz++) {
@@ -1573,11 +1863,12 @@
             for (let k = 0; k < arr.length; k++) {
               const idx = arr[k];
               const o = obstacles[idx];
-              if (o && o._q !== _obsQueryId) { o._q = _obsQueryId; result.push(idx); }
+              if (o && o._q !== _obsQueryId) { o._q = _obsQueryId; result[n++] = idx; }
             }
           }
         }
       }
+      _obsNearbyN = n;
       return result;
     }
     const _obsNearbyList = [];
@@ -1585,6 +1876,7 @@
 
     const MAX_BULLET_HOLES = 40;
     const fragments = [];
+    const _fragPool = []; // fragment records (mesh + vectors) reused by spawnFragments
     const MAX_FRAGMENTS = 80;
     const FRAGMENT_LIFE = 2.8;
     const _fragUnitGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -1619,11 +1911,14 @@
         varying float vAlpha;
         varying vec3 vColor;
         void main() {
-          vAlpha = aAlpha;
           vColor = color;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = aSize * (220.0 / -mv.z);
-          gl_Position = projectionMatrix * mv;
+          // Fade out right in front of the lens: a puff a metre away would otherwise fill the screen
+          vAlpha = aAlpha * smoothstep(0.35, 2.2, -mv.z);
+          // Stops growing inside 1 m (nearly transparent there), and a point too faint to see is moved
+          // out of the clip volume: both used to be rasterised at up to 1024 px for nothing
+          gl_PointSize = aSize * (220.0 / max(-mv.z, 1.0));
+          gl_Position = vAlpha < 0.01 ? vec4(0.0, 0.0, 2.0, 1.0) : projectionMatrix * mv;
         }
       `,
       fragmentShader: `
@@ -1765,11 +2060,14 @@
         varying float vAlpha;
         varying vec3 vColor;
         void main() {
-          vAlpha = aAlpha;
           vColor = color;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = aSize * (220.0 / -mv.z);
-          gl_Position = projectionMatrix * mv;
+          // Fade out right in front of the lens: a puff a metre away would otherwise fill the screen
+          vAlpha = aAlpha * smoothstep(0.35, 2.2, -mv.z);
+          // Stops growing inside 1 m (nearly transparent there), and a point too faint to see is moved
+          // out of the clip volume: both used to be rasterised at up to 1024 px for nothing
+          gl_PointSize = aSize * (220.0 / max(-mv.z, 1.0));
+          gl_Position = vAlpha < 0.01 ? vec4(0.0, 0.0, 2.0, 1.0) : projectionMatrix * mv;
         }
       `,
       fragmentShader: `
@@ -1848,8 +2146,41 @@
 
     function clearSmokeParticles() { smkCount = 0; smkGeo.setDrawRange(0, 0); }
 
+    // Dust motes hanging in the air around the player: they drift at full speed and all
+    // but stop in slow motion, which sells frozen time better than any screen filter.
+    const DUST_COUNT = 700;
+    const dustPos = new Float32Array(DUST_COUNT * 3), dustVel = new Float32Array(DUST_COUNT * 3);
+    for (let i = 0; i < DUST_COUNT; i++) {
+      dustPos[i * 3] = (Math.random() - 0.5) * 40; dustPos[i * 3 + 1] = Math.random() * 9; dustPos[i * 3 + 2] = (Math.random() - 0.5) * 40;
+      dustVel[i * 3] = (Math.random() - 0.5) * 0.35; dustVel[i * 3 + 1] = (Math.random() - 0.5) * 0.12; dustVel[i * 3 + 2] = (Math.random() - 0.5) * 0.35;
+    }
+    const dustGeo = new THREE.BufferGeometry();
+    dustGeo.setAttribute("position", new THREE.BufferAttribute(dustPos, 3));
+    const dustPoints = new THREE.Points(dustGeo, new THREE.ShaderMaterial({
+      // Soft round motes, faded next to the lens and towards the edge of the 40 m box they wrap in
+      vertexShader: 'varying float vA;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);vA=smoothstep(0.3,1.5,-mv.z)*(1.0-smoothstep(14.0,19.0,-mv.z));gl_PointSize=clamp(13.0/-mv.z,1.0,5.0);gl_Position=projectionMatrix*mv;}',
+      fragmentShader: 'varying float vA;void main(){vec2 c=gl_PointCoord-0.5;float d=dot(c,c);if(d>0.25)discard;gl_FragColor=vec4(0.85,0.9,1.0,vA*0.45*smoothstep(0.25,0.0,d));}',
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending
+    }));
+    dustPoints.frustumCulled = false;
+    dustPoints.matrixAutoUpdate = false;
+    scene.add(dustPoints);
+
+    function updateDust(dt) {
+      const cx = camera.position.x, cz = camera.position.z;
+      for (let i = 0; i < DUST_COUNT; i++) {
+        const k = i * 3;
+        let x = dustPos[k] + dustVel[k] * dt, y = dustPos[k + 1] + dustVel[k + 1] * dt, z = dustPos[k + 2] + dustVel[k + 2] * dt;
+        // Wrap inside a 40 x 9 x 40 box that follows the camera
+        if (x - cx > 20) x -= 40; else if (x - cx < -20) x += 40;
+        if (z - cz > 20) z -= 40; else if (z - cz < -20) z += 40;
+        if (y > 9) y -= 9; else if (y < 0) y += 9;
+        dustPos[k] = x; dustPos[k + 1] = y; dustPos[k + 2] = z;
+      }
+      dustGeo.attributes.position.needsUpdate = true;
+    }
+
     const bulletHoleGeo = new THREE.CircleGeometry(0.18, 20);
-    const burnRimGeo = new THREE.RingGeometry(0.14, 0.24, 24);
     const obsMats = {
       concrete: new THREE.MeshStandardMaterial({ color: 0x7d7d75, roughness: 0.94, metalness: 0.02 }),
       concreteDark: new THREE.MeshStandardMaterial({ color: 0x5e5e58, roughness: 0.92, metalness: 0.03 }),
@@ -2403,19 +2734,10 @@
     holeMesh.frustumCulled = false;
     scene.add(holeMesh);
     let _holeCursor = 0;
+    const _holeOwner = new Array(MAX_BULLET_HOLES).fill(null); // obstacle each hole sits on (null = floor/wall)
     const _holePos = new THREE.Vector3(), _holeQuat = new THREE.Quaternion(), _holeSpin = new THREE.Quaternion();
     const _holeScale = new THREE.Vector3(), _holeMat = new THREE.Matrix4();
-    const burnRimMat = new THREE.MeshBasicMaterial({
-      color: 0x8a7560,
-      transparent: true,
-      opacity: 0.22,
-      blending: THREE.NormalBlending,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -5,
-      polygonOffsetUnits: -5
-    });
+    const _holeHidden = new THREE.Matrix4().makeScale(0, 0, 0);
     const dissolveDustMatTemplate = new THREE.PointsMaterial({
       color: 0xb7b1a8,
       size: 0.11,
@@ -2425,17 +2747,13 @@
       blending: THREE.AdditiveBlending
     });
     const playerMuzzleConeMatTemplate = new THREE.MeshBasicMaterial({ color: 0xffc56e, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
-    const enemyMuzzleConeMatTemplate = new THREE.MeshBasicMaterial({ color: 0xff9a76, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
     const playerMuzzleSpriteMatTemplate = new THREE.SpriteMaterial({ map: flashTexture, color: 0xfff0c4, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
-    const enemyMuzzleSpriteMatTemplate = new THREE.SpriteMaterial({ map: flashTexture, color: 0xffc9b6, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending });
     const playerSparkMatTemplate = new THREE.PointsMaterial({ color: 0xffdf9d, size: 0.05, transparent: true, opacity: 0.88, depthWrite: false, blending: THREE.AdditiveBlending });
-    const enemySparkMatTemplate = new THREE.PointsMaterial({ color: 0xffbe9e, size: 0.048, transparent: true, opacity: 0.82, depthWrite: false, blending: THREE.AdditiveBlending });
     const muzzleConeGeo = new THREE.ConeGeometry(0.1, 0.36, 10);
 
-    function addBulletHole(point, normal, speed, travel) {
+    function addBulletHole(point, normal, speed, travel, owner = null) {
       const holeRadius = THREE.MathUtils.clamp(0.1 + speed * 0.0018 + travel * 0.002, 0.1, 0.32);
       const holeScale = holeRadius / 0.18;
-      const rimScale = (holeRadius * 1.35) / 0.24;
 
       _holePos.copy(point).addScaledVector(normal, 0.03);
       _holeQuat.setFromUnitVectors(bulletHoleForward, normal);
@@ -2443,6 +2761,7 @@
       _holeQuat.multiply(_holeSpin);
       _holeScale.setScalar(holeScale);
       holeMesh.setMatrixAt(_holeCursor, _holeMat.compose(_holePos, _holeQuat, _holeScale));
+      _holeOwner[_holeCursor] = owner;
       _holeCursor = (_holeCursor + 1) % MAX_BULLET_HOLES; // ring buffer: the oldest hole is overwritten
       if (holeMesh.count < MAX_BULLET_HOLES) holeMesh.count++;
       holeMesh.instanceMatrix.needsUpdate = true;
@@ -2528,7 +2847,10 @@
         const sx = THREE.MathUtils.randFloat(sizeMin, sizeMax);
         const sy = THREE.MathUtils.randFloat(sizeMin, sizeMax);
         const sz = THREE.MathUtils.randFloat(sizeMin, sizeMax);
-        const fMesh = new THREE.Mesh(_fragUnitGeo, mat);
+        // Pooled: 4-8 new meshes per impact were pure GC churn (the cap evicts them within ~0.2 s)
+        const f = _fragPool.pop() || { mesh: new THREE.Mesh(_fragUnitGeo, mat), vel: new THREE.Vector3(), spin: new THREE.Vector3(), life: 0, duration: 0, mat };
+        const fMesh = f.mesh;
+        fMesh.material = mat;
         fMesh.scale.set(sx, sy, sz);
         fMesh.position.copy(point);
         fMesh.position.x += (Math.random() - 0.5) * sizeMax * 1.2;
@@ -2537,24 +2859,25 @@
         fMesh.rotation.set(Math.random() * Math.PI * 2, Math.random() * Math.PI * 2, Math.random() * Math.PI * 2);
 
         const speed = THREE.MathUtils.randFloat(speedMin, speedMax);
-        const vel = new THREE.Vector3(
+        f.vel.set(
           normal.x * speed + (Math.random() - 0.5) * speed * 0.7,
           normal.y * speed + Math.random() * speed * 0.4 + 1.8,
           normal.z * speed + (Math.random() - 0.5) * speed * 0.7
         );
-        if (bulletVel) vel.addScaledVector(bulletVel, 0.1);
+        if (bulletVel) f.vel.addScaledVector(bulletVel, 0.1);
 
-        const spin = new THREE.Vector3(
+        f.spin.set(
           (Math.random() - 0.5) * 9,
           (Math.random() - 0.5) * 9,
           (Math.random() - 0.5) * 9
         );
+        f.life = FRAGMENT_LIFE; f.duration = FRAGMENT_LIFE; f.mat = mat;
         scene.add(fMesh);
-        fragments.push({ mesh: fMesh, vel, spin, life: FRAGMENT_LIFE, duration: FRAGMENT_LIFE, mat });
+        fragments.push(f);
       }
       if (fragments.length > MAX_FRAGMENTS) {
         const excess = fragments.length - MAX_FRAGMENTS;
-        for (let fi = 0; fi < excess; fi++) { scene.remove(fragments[fi].mesh); }
+        for (let fi = 0; fi < excess; fi++) { scene.remove(fragments[fi].mesh); _fragPool.push(fragments[fi]); }
         fragments.splice(0, excess);
       }
     }
@@ -2607,6 +2930,10 @@
         if (obj.isMesh && obj.geometry) obj.geometry.dispose();
       });
       scene.remove(obs.mesh);
+      // Its bullet holes would otherwise stay hanging in mid-air
+      for (let h = 0; h < MAX_BULLET_HOLES; h++) {
+        if (_holeOwner[h] === obs) { holeMesh.setMatrixAt(h, _holeHidden); _holeOwner[h] = null; holeMesh.instanceMatrix.needsUpdate = true; }
+      }
       const lastObs = obstacles.length - 1;
       if (index !== lastObs) obstacles[index] = obstacles[lastObs];
       obstacles.pop();
@@ -2648,6 +2975,7 @@
           scene.remove(f.mesh);
           // Don't dispose shared geometry/material from cache
           fragments.splice(i, 1);
+          _fragPool.push(f);
         }
       }
     }
@@ -2655,6 +2983,7 @@
     function clearFragments() {
       for (let i = 0; i < fragments.length; i++) {
         scene.remove(fragments[i].mesh);
+        _fragPool.push(fragments[i]);
       }
       fragments.length = 0;
     }
@@ -2684,16 +3013,19 @@
       return true;
     }
 
-    // Does the segment a->b pass through an obstacle? Exact slab test for boxes,
-    // closest-approach test for cylinders, then the obstacle's height range is
-    // checked where the segment crosses it. Drives enemy line of sight.
-    function segmentBlockedByObstacle(ax, ay, az, bx, by, bz) {
+    // Where does the segment a->b first enter an obstacle? Returns the fraction along
+    // a->b, or Infinity when clear. Exact slab test for boxes, chord test for cylinders,
+    // then the obstacle's height range is checked where the segment crosses it.
+    // Drives enemy line of sight and the player's aim distance.
+    function segmentObstacleT(ax, ay, az, bx, by, bz) {
       const dx = bx - ax, dy = by - ay, dz = bz - az;
       const len2 = dx * dx + dz * dz;
+      let best = Infinity;
       for (let i = 0; i < obstacles.length; i++) {
         const obs = obstacles[i];
         const cx = obs.mesh.position.x, cz = obs.mesh.position.z;
         let t = len2 > 0 ? ((cx - ax) * dx + (cz - az) * dz) / len2 : 0;
+        const tc = t; // closest approach of the infinite line
         t = t < 0 ? 0 : t > 1 ? 1 : t;
         const qx = ax + dx * t - cx, qz = az + dz * t - cz;
         if (qx * qx + qz * qz > obs.radius * obs.radius) continue; // bounding circle miss
@@ -2717,17 +3049,28 @@
           }
           if (tEnter > tExit) continue;
           t0 = tEnter; t1 = tExit;
+        } else if (len2 > 0) {
+          const px = ax + dx * tc - cx, pz = az + dz * tc - cz;
+          const half = Math.sqrt(Math.max(0, obs.radius * obs.radius - px * px - pz * pz) / len2);
+          t0 = Math.max(0, tc - half); t1 = Math.min(1, tc + half);
         }
-        const y0 = ay + dy * t0, y1 = ay + dy * t1;
+        // Clip to the obstacle's height too, so a round dropping onto a roof enters at the
+        // roof rather than where it crossed the footprint's edge
         const bottom = obs.mesh.position.y, top = bottom + obs.height;
-        if (Math.max(y0, y1) >= bottom && Math.min(y0, y1) <= top) return true;
+        if (dy !== 0) {
+          let ta = (bottom - ay) / dy, tb = (top - ay) / dy;
+          if (ta > tb) { const sw = ta; ta = tb; tb = sw; }
+          if (ta > t0) t0 = ta; if (tb < t1) t1 = tb;
+          if (t0 > t1) continue;
+        } else if (ay < bottom || ay > top) continue;
+        if (t0 < best) best = t0;
       }
-      return false;
+      return best;
     }
 
     function isPositionBlockedByObstacle(position, padding = 0) {
       const nearby = getObsNearby(position.x, position.z, padding);
-      for (let n = 0; n < nearby.length; n++) {
+      for (let n = 0; n < _obsNearbyN; n++) {
         const obs = obstacles[nearby[n]];
         if (obs && obsOverlap(obs, position.x, position.z, padding)) return true;
       }
@@ -2747,7 +3090,7 @@
 
     function resolvePositionAgainstObstacles(position, radius) {
       const nearby = getObsNearby(position.x, position.z, radius + 12);
-      for (let n = 0; n < nearby.length; n++) {
+      for (let n = 0; n < _obsNearbyN; n++) {
         const obs = obstacles[nearby[n]];
         if (!obs || !obsOverlap(obs, position.x, position.z, radius)) continue;
         position.x += _obsPush.x * _obsPush.depth;
@@ -2934,7 +3277,7 @@
     const _oiResult = { point: _oiPoint, normal: _oiNormal, obsIndex: -1 };
     function getObstacleImpact(position) {
       const nearby = getObsNearby(position.x, position.z, 1);
-      for (let n = 0; n < nearby.length; n++) {
+      for (let n = 0; n < _obsNearbyN; n++) {
         const i = nearby[n];
         const obs = obstacles[i];
         if (!obs) continue;
@@ -2976,21 +3319,16 @@
       return null;
     }
 
-    function clearImpactEffects() {
-      // Impact smoke now handled by GPU particle system
-      impactEffects.length = 0;
-    }
-
     const explosionEffects = [];
-    const EXPLOSION_COLOR_A = new THREE.Color(0xff4400);
-    const EXPLOSION_COLOR_B = new THREE.Color(0xffcc00);
 
     // Fixed pool of explosion lights, always present in the scene at intensity 0.
     // Adding/removing PointLights changes the scene light count, which forces
     // Three.js to recompile every MeshStandardMaterial shader — a 100ms+ hitch
     // on the first (and every light-count-changing) explosion.
+    // One light only: every point light is evaluated for every lit pixel even at intensity 0
+    // (~0.2 ms GPU each); a new explosion takes it over from an older one (see spawnExplosion).
     const _explosionLights = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 1; i++) {
       const l = new THREE.PointLight(0xff6600, 0, 40);
       l.position.set(0, -100, 0);
       scene.add(l);
@@ -3077,8 +3415,10 @@
       // Hot debris chunks
       spawnFragments(point, UP_AXIS, null, 0x3a352c, 8, 0.05, 0.22, 3.5, 9);
 
+      // Radial texture: without a map a sprite is a hard-edged square
       const glowMat = new THREE.SpriteMaterial({
-        color: 0xff6600, transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending
+        map: flashTexture, color: 0xff6600, transparent: true, opacity: 1.0,
+        blending: THREE.AdditiveBlending, depthWrite: false
       });
       const glow = new THREE.Sprite(glowMat);
       glow.position.copy(point);
@@ -3132,6 +3472,7 @@
         fx.life -= dt;
         const t = 1 - fx.life / fx.duration;
         fx.glow.material.opacity = Math.max(0, 1 - t * 2);
+        fx.glow.visible = fx.glow.material.opacity > 0; // a huge additive sprite, drawn for nothing once faded
         if (fx.light) fx.light.intensity = Math.max(0, 8 * (1 - t * 1.5));
 
         if (fx.flash) {
@@ -3331,6 +3672,9 @@
       });
     }
 
+    // Weapon id -> merged gun geometry, shared by every copy: the builders are deterministic, and
+    // rebuilding and merging ~16 parts for each spawn, drop and pickup cost ~1 ms (201 per restart)
+    const _gunGeoCache = new Map();
     function createWeaponModel(weapon) {
       const builders = {
         "player-rifle": buildM4Rifle,
@@ -3347,8 +3691,9 @@
         "railgun": buildRailgun,
       };
       const build = builders[weapon.id] || buildM4Rifle;
-      const group = build(weapon);
-      const merged = mergeGunGroup(group);
+      const cachedGeo = _gunGeoCache.get(weapon.id);
+      const merged = cachedGeo ? new THREE.Mesh(cachedGeo, gunMat) : mergeGunGroup(build(weapon));
+      if (!cachedGeo) { _gunGeoCache.set(weapon.id, merged.geometry); _sharedGeos.add(merged.geometry); }
       const lengthScale = 0.95 + (weapon.scaleY || 1) * 0.22;
       const widthScale = 0.9 + (weapon.scaleR || 1) * 0.18;
       merged.scale.set(widthScale, widthScale, lengthScale);
@@ -4001,12 +4346,6 @@
         emissiveIntensity: isBoss ? 0.55 : 0.12
       });
       root.add(new THREE.Mesh(geos.body, bodyMat));
-      // Hit-test anchors (head and torso are baked into the body mesh)
-      const head = new THREE.Object3D();
-      head.position.set(0, 2.28, 0);
-      const torso = new THREE.Object3D();
-      torso.position.set(0, 1.45, 0);
-      root.add(head, torso);
 
       function makeLeg(x) {
         const leg = new THREE.Group();
@@ -4044,8 +4383,6 @@
 
       return {
         mesh: root,
-        head,
-        torso,
         hitMaterial: bodyMat,
         clothHex: geos.cloth,
         rightArm: right.arm,
@@ -4066,7 +4403,9 @@
       const ctx = canvas.getContext("2d");
       const tex = new THREE.CanvasTexture(canvas);
       tex.minFilter = THREE.LinearFilter;
-      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+      tex.colorSpace = THREE.SRGBColorSpace; // canvas colours are sRGB: read as linear they wash out
+      // Depth-tested so cover hides it (it used to draw through walls)
+      const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
       const sprite = new THREE.Sprite(mat);
       const w = isBoss ? 1.8 : 1.2;
       sprite.scale.set(w, w * 8 / 64, 1);
@@ -4399,6 +4738,7 @@
 
     function startEnemyDissolve(mesh) {
       mesh.visible = true; // a billboard-LOD rig must show for its dissolve
+      mesh.matrixWorldAutoUpdate = true; // a sleeping rig is pruned from matrix updates
       const materials = [];
       mesh.traverse((obj) => {
         if (!obj.isMesh) return;
@@ -4416,6 +4756,7 @@
           if (materials.includes(m)) continue;
           materials.push(m);
           m.transparent = true;
+          m.needsUpdate = true; // the opaque program forces alpha = 1: without a recompile nothing fades
           m.depthWrite = false;
           m.opacity = 1;
           if (m.emissive) m.emissiveIntensity = (m.emissiveIntensity || 0) * 0.65;
@@ -4457,8 +4798,36 @@
       });
     }
 
-    function updateImpactEffects(dt) {
-      // Impact smoke now handled by GPU particle system
+    // The first shot and the first kill put new shader variants on screen: the muzzle flash, the
+    // see-through rig and gun of the dissolve, its dust, the pickups (and the first explosion its
+    // shock ring, the first frame of play the far-enemy billboards). Draw them once here, off-screen
+    // behind the start screen, instead of in those frames (the starting shotgun often kills with its
+    // first shot). A real draw: after renderer.compile() the driver still stalled 40-70 ms on first use.
+    // These copies are never disposed, so their programs also outlive every dissolve and pickup that is.
+    function warmUpShaders() {
+      const rig = createEnemyCharacter(getWeaponById("smg")).mesh;
+      const pickups = new THREE.Group().add(createHealthPickupMesh().group, createArmorPickupMesh().group);
+      const copyMaterials = (root, seeThrough) => root.traverse((o) => {
+        if (!o.isMesh) return;
+        o.material = o.material.clone(); // the shared originals stay untouched
+        if (o.material.userData.gunShader) applyGunShader(o.material);
+        if (seeThrough) o.material.transparent = true;
+      });
+      copyMaterials(rig, true); // as startEnemyDissolve leaves a dying rig
+      copyMaterials(pickups, false);
+      const dustGeo = new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(3), 3));
+      const flash = _createMuzzlePoolEntry();
+      const group = new THREE.Group().add(rig, pickups, new THREE.Points(dustGeo, dissolveDustMatTemplate.clone()),
+        flash.cone, flash.sprite, flash.sparks, new THREE.Mesh(_shockRingGeo, _shockRings[0].material.clone()));
+      group.traverse((o) => { o.frustumCulled = false; }); // drawn wherever the camera looks
+      scene.add(group);
+      lodMesh.count = 1; // an empty instanced draw may not reach the driver's shader build
+      const prevTarget = renderer.getRenderTarget();
+      renderer.setRenderTarget(composer.readBuffer); // off-screen like RenderPass (part of each program's key); the next frame redraws it
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(prevTarget);
+      lodMesh.count = 0;
+      scene.remove(group);
     }
 
     function updateMuzzleEffects(dt) {
@@ -4545,107 +4914,6 @@
       }
     }
 
-    function spawnBulletCollisionSparks(point) {
-      const sparkCount = 12;
-      const sparkPos = new Float32Array(sparkCount * 3);
-      const sparkVel = new Float32Array(sparkCount * 3);
-      for (let i = 0; i < sparkCount; i++) {
-        const idx = i * 3;
-        sparkPos[idx] = point.x + (Math.random() - 0.5) * 0.06;
-        sparkPos[idx + 1] = point.y + (Math.random() - 0.5) * 0.06;
-        sparkPos[idx + 2] = point.z + (Math.random() - 0.5) * 0.06;
-        const speed = 3.5 + Math.random() * 5;
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.random() * Math.PI;
-        sparkVel[idx] = Math.sin(phi) * Math.cos(theta) * speed;
-        sparkVel[idx + 1] = Math.sin(phi) * Math.sin(theta) * speed + 1.5;
-        sparkVel[idx + 2] = Math.cos(phi) * speed;
-      }
-      const sparkGeo = new THREE.BufferGeometry();
-      sparkGeo.setAttribute("position", new THREE.BufferAttribute(sparkPos, 3));
-      const sparkMat = new THREE.PointsMaterial({ color: 0xff3318, size: 0.065, transparent: true, opacity: 0.95, depthWrite: false, blending: THREE.AdditiveBlending });
-      const sparks = new THREE.Points(sparkGeo, sparkMat);
-      scene.add(sparks);
-
-      const glowMat = new THREE.SpriteMaterial({ color: 0xff5522, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
-      const glow = new THREE.Sprite(glowMat);
-      glow.position.copy(point);
-      glow.scale.set(0.5, 0.5, 1);
-      scene.add(glow);
-
-      bulletCollisionEffects.push({ sparks, sparkPos, sparkVel, glow, life: 0.28, duration: 0.28 });
-    }
-
-    function updateBulletCollisionEffects(dt) {
-      for (let i = bulletCollisionEffects.length - 1; i >= 0; i--) {
-        const fx = bulletCollisionEffects[i];
-        fx.life -= dt;
-        const t = 1 - Math.max(0, fx.life) / fx.duration;
-        const fade = Math.max(0, 1 - t);
-        for (let p = 0; p < fx.sparkPos.length; p += 3) {
-          fx.sparkPos[p] += fx.sparkVel[p] * dt;
-          fx.sparkPos[p + 1] += fx.sparkVel[p + 1] * dt - 4.8 * dt * dt;
-          fx.sparkPos[p + 2] += fx.sparkVel[p + 2] * dt;
-          fx.sparkVel[p] *= 0.92;
-          fx.sparkVel[p + 1] -= 9.8 * dt;
-          fx.sparkVel[p + 2] *= 0.92;
-        }
-        fx.sparks.geometry.attributes.position.needsUpdate = true;
-        fx.sparks.material.opacity = fade * 0.95;
-        fx.sparks.material.size = 0.065 * (1 + t * 0.6);
-        const gs = 0.5 * (1 + t * 2.5) * fade;
-        fx.glow.scale.set(gs, gs, 1);
-        fx.glow.material.opacity = fade * 0.7;
-        if (fx.life <= 0) {
-          scene.remove(fx.sparks);
-          scene.remove(fx.glow);
-          fx.sparks.geometry.dispose();
-          fx.sparks.material.dispose();
-          fx.glow.material.dispose();
-          bulletCollisionEffects.splice(i, 1);
-        }
-      }
-    }
-
-    function clearBulletCollisionEffects() {
-      for (let i = 0; i < bulletCollisionEffects.length; i++) {
-        const fx = bulletCollisionEffects[i];
-        scene.remove(fx.sparks);
-        scene.remove(fx.glow);
-        fx.sparks.geometry.dispose();
-        fx.sparks.material.dispose();
-        fx.glow.material.dispose();
-      }
-      bulletCollisionEffects.length = 0;
-    }
-
-    function checkBulletBulletCollisions() {
-      for (let i = bullets.length - 1; i >= 0; i--) {
-        const a = bullets[i];
-        if (!a) continue;
-        for (let j = i - 1; j >= 0; j--) {
-          const b = bullets[j];
-          if (!b) continue;
-          if (a.ownerEnemyId && a.ownerEnemyId === b.ownerEnemyId) continue;
-          if (!a.enemy && !b.enemy) continue;
-          const dx = a.bPos.x - b.bPos.x;
-          const dy = a.bPos.y - b.bPos.y;
-          const dz = a.bPos.z - b.bPos.z;
-          const collDist = a.radius + b.radius + 0.12;
-          if (dx * dx + dy * dy + dz * dz > collDist * collDist) continue;
-          const midPoint = tempVec3.set(
-            (a.bPos.x + b.bPos.x) * 0.5,
-            (a.bPos.y + b.bPos.y) * 0.5,
-            (a.bPos.z + b.bPos.z) * 0.5
-          );
-          // collision sparks disabled
-          removeBulletAt(i);
-          if (j < bullets.length) removeBulletAt(j);
-          break;
-        }
-      }
-    }
-
     function resetGame() {
       gameOver = false;
       paused = true; // pointerlockchange unpauses once the lock is really held
@@ -4659,6 +4927,7 @@
       player.dashTimer = 0;
       player.dashDir.set(0, 0, 0);
       mouseDown = false;
+      queuedShot = false;
       for (const k in keys) keys[k] = false;
       pointerLockGrace = 0.3;
       playerWeapon = getWeaponById("shotgun");
@@ -4691,11 +4960,10 @@
         disposeHealthBar(e.hpBar);
         scene.remove(e.mesh); disposeMeshResources(e.mesh);
       });
-      holeMesh.count = 0; _holeCursor = 0;
-      clearImpactEffects();
+      holeMesh.count = 0; _holeCursor = 0; _holeOwner.fill(null);
+      _pulse = 0;
       clearDissolveEffects();
       clearMuzzleEffects();
-      clearBulletCollisionEffects();
       clearExplosionEffects();
       clearGpuParticles();
       clearSmokeParticles();
@@ -4717,7 +4985,7 @@
       for (let i = 0; i < ROUND_ENEMY_COUNT; i++) spawnEnemy(true);
       spawnEnemy(true, true);
       enemiesLeft = ROUND_ENEMY_COUNT + 1;
-      updateHud();
+      updateHud(true); // throttled otherwise: the card could show the previous round's HP
     }
 
     function spawnEnemy(scatterOnMap = false, isBoss = false) {
@@ -4788,9 +5056,9 @@
       enemies.push({
         id: nextEnemyId++,
         mesh,
-        head: rig.head,
-        torso: rig.torso,
         hitMaterial: rig.hitMaterial,
+        baseEmissive: rig.hitMaterial.emissive.getHex(), // restored when a hit flash ends
+        baseEmissiveIntensity: rig.hitMaterial.emissiveIntensity,
         rightArm: rig.rightArm,
         rightFore: rig.rightFore,
         leftArm: rig.leftArm,
@@ -4825,8 +5093,7 @@
       bulletGeoCache[wid] = {
         tip: new THREE.ConeGeometry(shape.tipR, shape.tipH, 10),
         body: new THREE.CylinderGeometry(shape.bodyR1, shape.bodyR2, shape.bodyH, 10),
-        casing: new THREE.CylinderGeometry(shape.casingR, shape.casingR, shape.casingH, 10),
-        band: new THREE.TorusGeometry(shape.bandR, 0.006, 6, 12)
+        casing: new THREE.CylinderGeometry(shape.casingR, shape.casingR, shape.casingH, 10)
       };
       return bulletGeoCache[wid];
     }
@@ -4857,12 +5124,6 @@
           roughness: isRpg ? 0.65 : isShotgun ? 0.8 : 0.18,
           emissive: isRpg ? 0x1a2010 : isShotgun ? 0x330808 : 0x443300,
           emissiveIntensity: 0.15
-        }),
-        // Band: cannelure groove / RPG: stabilizer fin ring
-        band: new THREE.MeshStandardMaterial({
-          color: isRpg ? 0x2a3a1a : 0x8a7a50, metalness: isRpg ? 0.3 : 0.82,
-          roughness: isRpg ? 0.6 : 0.25, emissive: isRpg ? 0x111a08 : 0x443300,
-          emissiveIntensity: 0.1
         })
       };
       return bulletMatCache[wid];
@@ -4873,7 +5134,6 @@
     const bulletInstData = {};
     const bulletPartOffsets = {};
     const instTempMat = new THREE.Matrix4();
-    const instTempMat2 = new THREE.Matrix4();
     const instTempScale = new THREE.Vector3();
     const instTempPos = new THREE.Vector3();
     const instTempQuat = new THREE.Quaternion();
@@ -4927,7 +5187,6 @@
         tipY: shape.bodyH * 0.5 + shape.tipH * 0.5 - adj,
         bodyY: -adj,
         casingY: -(shape.bodyH * 0.5 + shape.casingH * 0.5) - adj,
-        bandY: -shape.bodyH * 0.28 - adj,
         sx: wS, sy: wS, sz: lS
       };
     }
@@ -5049,39 +5308,65 @@
         const c = bulletInstCounters[wid] || 0;
         const sc = shellInstCounters[wid] || 0;
         bi.tip.count = c; bi.body.count = c; bi.groove.count = c; bi.casing.count = sc;
-        if (c > 0) {
-          bi.tip.instanceMatrix.needsUpdate = true;
-          bi.body.instanceMatrix.needsUpdate = true;
-          bi.groove.instanceMatrix.needsUpdate = true;
+        // An empty set still costs a program/state switch in the render list
+        bi.tip.visible = bi.body.visible = bi.groove.visible = c > 0;
+        bi.casing.visible = sc > 0;
+        if (c > 0) { markInstances(bi.tip, c); markInstances(bi.body, c); markInstances(bi.groove, c); }
+        if (sc > 0) markInstances(bi.casing, sc);
+      }
+    }
+
+    // Upload only the instances in use: needsUpdate alone re-sends all MAX_BULLET_INST matrices
+    function markInstances(mesh, count) {
+      const a = mesh.instanceMatrix;
+      a.clearUpdateRanges();
+      a.addUpdateRange(0, count * 16);
+      a.needsUpdate = true;
+    }
+
+    // Distance along the crosshair ray to whatever it is on (floor, arena wall, enemy
+    // body, obstacle) within the round's reach, so the shot can be lofted to land exactly there.
+    const AIM_DEFAULT_DIST = 60; // nothing under the crosshair: sky or out of reach
+    function estimateAimDistance(origin, dir, reach) {
+      let best = reach;
+      if (dir.y < 0) best = Math.min(best, -origin.y / dir.y);
+      const wall = arena - 0.5;
+      if (dir.x !== 0) { const t = ((dir.x > 0 ? wall : -wall) - origin.x) / dir.x; if (t < best && origin.y + dir.y * t < 7) best = t; }
+      if (dir.z !== 0) { const t = ((dir.z > 0 ? wall : -wall) - origin.z) / dir.z; if (t < best && origin.y + dir.y * t < 7) best = t; }
+
+      const h2 = dir.x * dir.x + dir.z * dir.z;
+      if (h2 > 1e-8) {
+        for (let i = 0; i < enemies.length; i++) {
+          const e = enemies[i], p = e.mesh.position;
+          // Closest pass of the ray to the enemy's vertical axis
+          const t = ((p.x - origin.x) * dir.x + (p.z - origin.z) * dir.z) / h2;
+          if (t <= 0 || t >= best) continue;
+          const lx = origin.x + dir.x * t - p.x, lz = origin.z + dir.z * t - p.z;
+          const y = origin.y + dir.y * t - p.y;
+          if (lx * lx + lz * lz < 0.36 && y > -0.4 && y < 2.6 * e.mesh.scale.y) best = t;
         }
-        if (sc > 0) bi.casing.instanceMatrix.needsUpdate = true;
-      }
-    }
-
-    function createBulletVisual(weapon, fromEnemy) {
-      // Lightweight: no mesh added to scene, InstancedMesh handles rendering
-      return { mesh: null, ring: null };
-    }
-
-    function estimateShotDistance(origin, dir) {
-      let best = 36;
-
-      for (let i = 0; i < enemies.length; i++) {
-        tempVec1.copy(enemies[i].mesh.position).sub(origin);
-        const forward = tempVec1.dot(dir);
-        if (forward <= 0 || forward >= best) continue;
-
-        const lateralSq = Math.max(0, tempVec1.lengthSq() - forward * forward);
-        if (lateralSq < 1.7) best = forward;
       }
 
-      if (dir.y < -0.08) {
-        const t = (0 - origin.y) / dir.y;
-        if (t > 0) best = Math.min(best, t);
-      }
-
-      return THREE.MathUtils.clamp(best, 8, 45);
+      const oT = segmentObstacleT(origin.x, origin.y, origin.z, origin.x + dir.x * best, origin.y + dir.y * best, origin.z + dir.z * best);
+      if (oT !== Infinity) best *= oT;
+      return best < reach ? Math.max(1, best) : Math.min(reach, AIM_DEFAULT_DIST);
     }
+
+    // Tilt a unit direction up so a round fired at `speed` under `gravity` passes through
+    // the point `dist` away along it (flat root of the ballistic equation). A point out
+    // of reach keeps the straight aim.
+    function loftDirection(dir, speed, gravity, dist) {
+      const h = Math.hypot(dir.x, dir.z);
+      if (gravity <= 0 || h < 1e-6) return dir;
+      const x = h * dist, y = dir.y * dist, v2 = speed * speed;
+      const disc = v2 * v2 - gravity * (gravity * x * x + 2 * y * v2);
+      if (disc < 0) return dir;
+      const tan = (v2 - Math.sqrt(disc)) / (gravity * x);
+      const c = 1 / Math.sqrt(1 + tan * tan);
+      return dir.set(dir.x / h * c, tan * c, dir.z / h * c);
+    }
+    // Self-check: 20 units ahead at 20 u/s under g = 2 needs tan = (400 - sqrt(158400)) / 40
+    console.assert(Math.abs(loftDirection(new THREE.Vector3(0, 0, -1), 20, 2, 20).y - 0.050063) < 1e-5, "loftDirection");
 
     const _spreadRef = new THREE.Vector3();
     const _spreadTan = new THREE.Vector3();
@@ -5196,7 +5481,7 @@
     for (let sIdx = 0; sIdx < TRAIL_SLOTS; sIdx++) {
       for (let strip = 0; strip < 2; strip++) {
         const vBase = sIdx * SLOT_VERTS + strip * TRAIL_VERTS;
-        const op = strip === 0 ? 0.105 : 0.035;
+        const op = strip === 0 ? 0.063 : 0.021; // a faint air wake, not a glowing ribbon
         for (let i = 0; i < TRAIL_SEGMENTS; i++) {
           const a = Math.pow(1 - i / (TRAIL_SEGMENTS - 1), 2.5) * op;
           trailAlpha[vBase + i * 2] = a; trailAlpha[vBase + i * 2 + 1] = a;
@@ -5214,9 +5499,11 @@
     trailGeo.setAttribute('alpha', new THREE.BufferAttribute(trailAlpha, 1));
     trailGeo.setIndex(new THREE.BufferAttribute(trailIdx, 1));
     trailGeo.setDrawRange(0, 0);
+    // A ribbon passing within a few metres of the lens fades out: camera-facing strips that
+    // close used to sweep across the screen as huge glassy sheets.
     const trailMesh = new THREE.Mesh(trailGeo, new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, side: THREE.DoubleSide, vertexColors: true,
-      vertexShader: 'attribute float alpha;varying float vAlpha;varying vec3 vColor;void main(){vAlpha=alpha;vColor=color;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+      vertexShader: 'attribute float alpha;varying float vAlpha;varying vec3 vColor;void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);vAlpha=alpha*smoothstep(0.6,3.5,length(mv.xyz));vColor=color;gl_Position=projectionMatrix*mv;}',
       fragmentShader: 'varying float vAlpha;varying vec3 vColor;void main(){gl_FragColor=vec4(vColor,vAlpha);}'
     }));
     trailMesh.frustumCulled = false;
@@ -5224,9 +5511,10 @@
 
     // Low slots first, so the uploaded/drawn range stays as short as possible
     const trailPool = [];
-    for (let sIdx = TRAIL_SLOTS - 1; sIdx >= 0; sIdx--) trailPool.push({ slot: sIdx, spinePos: new Float32Array(TRAIL_SEGMENTS * 3), collapsed: true });
+    for (let sIdx = TRAIL_SLOTS - 1; sIdx >= 0; sIdx--) trailPool.push({ slot: sIdx, spinePos: new Float32Array(TRAIL_SEGMENTS * 3), collapsed: true, camX: 0, camY: 0, camZ: 0 });
     let _trailColMin = Infinity, _trailColMax = -1;
     const _trailColor = new THREE.Color();
+    const TRAIL_VAPOR = new THREE.Color(0.84, 0.87, 0.91); // air wake, not a glowing tracer: keeps a hint of the weapon tint
 
     function getPooledTrail() { return trailPool.pop(); } // never empty: shoot() caps bullets at TRAIL_SLOTS
 
@@ -5244,7 +5532,7 @@
     function setTrailColors(trail, coreHex, outerHex) {
       const base = trail.slot * SLOT_VERTS * 3;
       for (let strip = 0; strip < 2; strip++) {
-        _trailColor.setHex(strip === 0 ? coreHex : outerHex);
+        _trailColor.setHex(strip === 0 ? coreHex : outerHex).lerp(TRAIL_VAPOR, 0.75);
         const b0 = base + strip * TRAIL_VERTS * 3;
         for (let i = 0; i < TRAIL_VERTS; i++) {
           trailCol[b0 + i * 3] = _trailColor.r; trailCol[b0 + i * 3 + 1] = _trailColor.g; trailCol[b0 + i * 3 + 2] = _trailColor.b;
@@ -5254,12 +5542,17 @@
       if (trail.slot > _trailColMax) _trailColMax = trail.slot;
     }
 
-    function updateRibbonsFromSpine(sp, trail, coreWidth, outerWidth) {
+    function updateRibbonsFromSpine(sp, trail, coreWidth, outerWidth, shifted) {
+      const camPos = camera.position;
+      // Between spine shifts only the head segment moves; the others change only with the camera
+      // position they were built for, so most frames in slow motion rebuild 1 segment instead of 64
+      const full = shifted || trail.collapsed || camPos.x !== trail.camX || camPos.y !== trail.camY || camPos.z !== trail.camZ;
+      if (full) { trail.camX = camPos.x; trail.camY = camPos.y; trail.camZ = camPos.z; }
       trail.collapsed = false;
       const cb = trail.slot * SLOT_VERTS * 3, ob = cb + TRAIL_VERTS * 3;
-      const camPos = camera.position;
       const invSeg = 1 / (TRAIL_SEGMENTS - 1);
-      for (let si = 0; si < TRAIL_SEGMENTS; si++) {
+      const segs = full ? TRAIL_SEGMENTS : 1;
+      for (let si = 0; si < segs; si++) {
         const si3 = si * 3;
         const cx = sp[si3], cy = sp[si3 + 1], cz = sp[si3 + 2];
         let fwx, fwy, fwz;
@@ -5315,34 +5608,57 @@
         gravity: 0, spin: 0, spinPhase: 0, ringAngle: 0,
         trailTimer: 0, trailSeed: 0, trailAmplitude: 0, trailJitter: 0,
         twistA: 0, trailSpacing: 0, headOffset: 0, life: 0, vaporAcc: 0,
-        enemy: false, damage: 0, radius: 0, isRocket: false, explosionRadius: 0
+        enemy: false, damage: 0, radius: 0, isRocket: false, explosionRadius: 0, born: 0, dead: false
       };
+    }
+
+    // At the cap the oldest enemy round goes (a player round only if there is none).
+    // bullets[0] is not the oldest: swap-and-pop reorders the array, so it used to
+    // evict the newest round and a shotgun blast's pellets deleted each other.
+    let _bulletSerial = 0;
+    function evictOldestBullet() {
+      let pick = -1, pickBorn = Infinity, oldest = 0, oldestBorn = Infinity;
+      for (let i = 0; i < bullets.length; i++) {
+        const b = bullets[i];
+        if (b.born < oldestBorn) { oldestBorn = b.born; oldest = i; }
+        if (b.enemy && b.born < pickBorn) { pickBorn = b.born; pick = i; }
+      }
+      removeBulletAt(pick >= 0 ? pick : oldest);
     }
 
     const _shootDir = new THREE.Vector3();
     const _shootBase = new THREE.Vector3();
+    // distanceHint = distance to the aimed point: it scales the drop of lobbed explosives and their arc is aimed to land there
     function shoot(from, dir, weapon, fromEnemy, distanceHint = 20, ownerEnemyId = null) {
       const pellets = Math.max(1, weapon.pellets || 1);
+      // Bullets fly dead straight like real ones (hundreds of m/s: no visible drop across this
+      // arena); only grenades and rockets arc
+      let gravity = 0;
+      if (weapon.isRocket) {
+        const gravityScale = THREE.MathUtils.clamp(distanceHint / 24, 0.25, 1.45);
+        const power = THREE.MathUtils.clamp(weapon.power ?? 0.6, 0.2, 1);
+        gravity = (weapon.gravityBase ?? 3.6) * gravityScale * (1.35 - power) * 0.62;
+      }
       _shootBase.copy(dir); // dir may alias _spreadResult: keep a stable base so pellet spread does not accumulate
+      loftDirection(_shootBase, weapon.speed, gravity, distanceHint);
       spawnMuzzleFlash(from, _shootBase, weapon, fromEnemy);
       if (!weapon.isRocket) ejectShell(from, _shootBase, weapon.id);
 
       for (let pellet = 0; pellet < pellets; pellet++) {
         if (pellets === 1) { _shootDir.copy(_shootBase); } else { applyDirectionSpread(_shootBase, weapon.spread * 0.95); _shootDir.copy(_spreadResult); }
 
-        if (bullets.length >= MAX_BULLETS) removeBulletAt(0); // evict the oldest: keeps a trail slot free
+        if (bullets.length >= MAX_BULLETS) evictOldestBullet(); // keeps a trail slot free
         const trail = getPooledTrail();
         for (let i = 0; i < TRAIL_SEGMENTS; i++) {
           const idx = i * 3;
           trail.spinePos[idx] = from.x; trail.spinePos[idx + 1] = from.y; trail.spinePos[idx + 2] = from.z;
         }
-        // Hot white-ish core, weapon-tinted halo
+        // Warm core, weapon-tinted halo (both washed towards vapour grey in setTrailColors)
         setTrailColors(trail, 0xfff3dd, weapon.ringColor || 0xd0cdc6);
 
-        const gravityScale = THREE.MathUtils.clamp(distanceHint / 24, 0.25, 1.45);
-        const power = THREE.MathUtils.clamp(weapon.power ?? 0.6, 0.2, 1);
-        const gravity = (weapon.gravityBase ?? 3.6) * gravityScale * (1.35 - power) * 0.62;
         const b = _allocBullet();
+        b.born = ++_bulletSerial;
+        b.dead = false;
         b.bPos.copy(from);
         b.bQuat.setFromUnitVectors(BULLET_AXIS, _shootDir);
         b.trail = trail;
@@ -5388,19 +5704,21 @@
     }
 
     function tryPlayerShoot() {
-      if (player.fireCooldown > 0 || gameOver) return;
+      if (player.fireCooldown > 0 || gameOver) return false;
       ensureAudio();
       tempVec3.set(0, 0, -1).applyEuler(camera.rotation).normalize();
+      // The point under the crosshair: shoot() lofts the round so it lands exactly there
+      tempVec1.copy(camera.position).addScaledVector(tempVec3, estimateAimDistance(camera.position, tempVec3, playerWeapon.speed * (playerWeapon.life ?? 3.8)));
       if (isAiming || !viewGun) {
         tempVec4.copy(camera.position).addScaledVector(tempVec3, 0.7);
       } else {
-        // Fire from the view-model muzzle, converging on the crosshair 30 units out
+        // Fire from the view-model muzzle, converging on that point
         viewGun.updateWorldMatrix(true, false);
         viewGun.localToWorld(tempVec4.copy(GUN_MUZZLE_LOCAL));
-        tempVec1.copy(camera.position).addScaledVector(tempVec3, 30);
-        tempVec3.copy(tempVec1).sub(tempVec4).normalize();
       }
-      const distanceHint = estimateShotDistance(tempVec4, tempVec3);
+      tempVec3.copy(tempVec1).sub(tempVec4);
+      const distanceHint = Math.max(0.01, tempVec3.length());
+      tempVec3.multiplyScalar(1 / distanceHint);
       shoot(tempVec4, tempVec3, playerWeapon, false, distanceHint);
       viewKick = 1;
       playGunSound(playerWeapon.id, 1.0);
@@ -5416,6 +5734,7 @@
       yaw += (Math.random() - 0.5) * rk * 0.5;
       camera.rotation.set(pitch, yaw, 0, "YXZ");
       addShake(0.012 + (playerWeapon.power || 0.6) * 0.03);
+      return true;
     }
 
     let hudThrottle = 0;
@@ -5494,6 +5813,7 @@
 
     function endGame() {
       gameOver = true;
+      updateHud(true); // the per-frame update is throttled and stops once the game is over
       overlay.classList.remove("hidden");
       const card = overlay.querySelector(".card");
       card.querySelector("h1").textContent = "Bạn đã thua!";
@@ -5506,6 +5826,7 @@
     function winGame() {
       gameOver = true;
       gameWon = true;
+      updateHud(true);
       overlay.classList.remove("hidden");
       const card = overlay.querySelector(".card");
       card.querySelector("h1").textContent = "Chúc mừng! Bạn đã chiến thắng!";
@@ -5534,14 +5855,15 @@
       if (e.code === "KeyR" && gameOver) restartRound();
     });
 
-    window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouseDown = false; });
+    window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouseDown = false; queuedShot = false; });
 
     document.addEventListener("contextmenu", (e) => { e.preventDefault(); });
     document.addEventListener("keyup", (e) => { keys[e.code] = false; });
     document.addEventListener("mousedown", (e) => {
       if (e.button === 0) {
         mouseDown = true;
-        if (document.pointerLockElement && pointerLockGrace <= 0) tryPlayerShoot();
+        // A click in the last moments of the cooldown fires as soon as it ends
+        if (document.pointerLockElement && pointerLockGrace <= 0 && !tryPlayerShoot()) queuedShot = player.fireCooldown < 0.25;
       } else if (e.button === 2) {
         setAiming(true);
       }
@@ -5598,6 +5920,7 @@
         hintTimer = setTimeout(() => hintEl.classList.add("fade"), 6000);
       } else {
         setAiming(false);
+        queuedShot = false;
         clearTimeout(hintTimer);
         hintEl.classList.remove("fade");
       }
@@ -5642,7 +5965,10 @@
       player.fireCooldown = Math.max(0, player.fireCooldown - dt);
       player.dashCd = Math.max(0, player.dashCd - dt);
       if (pointerLockGrace > 0) pointerLockGrace -= dt;
-      if (mouseDown && document.pointerLockElement && pointerLockGrace <= 0) tryPlayerShoot();
+      // Automatic guns fire while the button is held, semi-automatic ones once per click
+      if (document.pointerLockElement && pointerLockGrace <= 0 && (queuedShot || (mouseDown && playerWeapon.mode === "auto"))) {
+        if (tryPlayerShoot()) queuedShot = false;
+      }
 
       if (!canUseSniperScope() && isAiming) setAiming(false);
       // Slight FOV kick while dashing sells the burst of speed
@@ -5706,7 +6032,7 @@
           e.mesh.position.addScaledVector(tempVec3, e.speed * gdt);
           continue;
         }
-        e.mesh.matrixWorldAutoUpdate = true; // rig vs. billboard visibility is decided in updateEnemyLod
+        e.mesh.matrixWorldAutoUpdate = true; // updateEnemyLod prunes it again while the enemy is drawn as a billboard
 
         const moving = dist > 5.5;
         const inRange = dist < weapon.range;
@@ -5739,9 +6065,11 @@
           e.losTimer -= gdt;
           if (e.losTimer <= 0) {
             e.losTimer = 0.2 + Math.random() * 0.1;
-            e.hasLos = !segmentBlockedByObstacle(e.mesh.position.x, e.mesh.position.y + 1.6, e.mesh.position.z, playerPos.x, playerPos.y, playerPos.z);
+            e.hasLos = segmentObstacleT(e.mesh.position.x, e.mesh.position.y + 1.6, e.mesh.position.z, playerPos.x, playerPos.y, playerPos.z) === Infinity;
           }
-          tempVec3.copy(playerPos).add(AIM_PLAYER_OFFSET).sub(muzzle).normalize();
+          tempVec3.copy(playerPos).add(AIM_PLAYER_OFFSET).sub(muzzle);
+          const aimDist = Math.max(0.01, tempVec3.length()); // shoot() lofts the round to land at this range
+          tempVec3.multiplyScalar(1 / aimDist);
           const aimBase = tempVec3;
           const aimSpread = weapon.pellets ? weapon.spread * 0.18 : weapon.spread;
 
@@ -5755,8 +6083,8 @@
 
               if (e.shootCd <= 0) {
                 const dir = applyDirectionSpread(aimBase, aimSpread);
-                shoot(muzzle, dir, weapon, true, dist, e.id);
-                playGunSound(weapon.id, Math.max(0.08, 1.0 - dist / 80));
+                shoot(muzzle, dir, weapon, true, aimDist, e.id);
+                playGunSound(weapon.id, Math.max(0.08, 1.0 - dist / 80), dist, panFor(muzzle));
                 e.burstLeft -= 1;
                 e.shootCd = weapon.shotInterval * THREE.MathUtils.randFloat(0.86, 1.18);
 
@@ -5767,8 +6095,8 @@
             }
           } else if (e.shootCd <= 0) {
             const dir = applyDirectionSpread(aimBase, aimSpread);
-            shoot(muzzle, dir, weapon, true, dist, e.id);
-            playGunSound(weapon.id, Math.max(0.08, 1.0 - dist / 80));
+            shoot(muzzle, dir, weapon, true, aimDist, e.id);
+            playGunSound(weapon.id, Math.max(0.08, 1.0 - dist / 80), dist, panFor(muzzle));
             e.shootCd = weapon.shotInterval * THREE.MathUtils.randFloat(0.88, 1.18);
           }
         }
@@ -5782,8 +6110,8 @@
           e.hitFlash = Math.max(0, e.hitFlash - gdt * 2.4);
           if (e.hitMaterial && e.hitMaterial.emissive) {
             if (e.hitFlash <= 0) {
-              e.hitMaterial.emissive.setHex(0x110908);
-              e.hitMaterial.emissiveIntensity = 0.12;
+              e.hitMaterial.emissive.setHex(e.baseEmissive);
+              e.hitMaterial.emissiveIntensity = e.baseEmissiveIntensity;
             }
           }
         }
@@ -5804,10 +6132,123 @@
       }
     }
 
+    // Squared distance between segments p1-q1 and p2-q2 (Ericson, Real-Time Collision Detection 5.1.9)
+    function segSegDistSq(p1x, p1y, p1z, q1x, q1y, q1z, p2x, p2y, p2z, q2x, q2y, q2z) {
+      const d1x = q1x - p1x, d1y = q1y - p1y, d1z = q1z - p1z;
+      const d2x = q2x - p2x, d2y = q2y - p2y, d2z = q2z - p2z;
+      const rx = p1x - p2x, ry = p1y - p2y, rz = p1z - p2z;
+      const a = d1x * d1x + d1y * d1y + d1z * d1z, e = d2x * d2x + d2y * d2y + d2z * d2z;
+      const f = d2x * rx + d2y * ry + d2z * rz;
+      const clamp = THREE.MathUtils.clamp;
+      let s = 0, t = 0;
+      if (a <= 1e-12) {
+        if (e > 1e-12) t = clamp(f / e, 0, 1);
+      } else {
+        const c = d1x * rx + d1y * ry + d1z * rz;
+        if (e <= 1e-12) {
+          s = clamp(-c / a, 0, 1);
+        } else {
+          const bb = d1x * d2x + d1y * d2y + d1z * d2z, denom = a * e - bb * bb;
+          s = denom > 1e-12 ? clamp((bb * f - c * e) / denom, 0, 1) : 0;
+          t = (bb * s + f) / e;
+          if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); }
+          else if (t > 1) { t = 1; s = clamp((bb - c) / a, 0, 1); }
+        }
+      }
+      const dx = rx + d1x * s - d2x * t, dy = ry + d1y * s - d2y * t, dz = rz + d1z * s - d2z * t;
+      return dx * dx + dy * dy + dz * dz;
+    }
+
+    // Does a round's path a -> b pass within `radius` of the segment from local (0, y0, 0)
+    // to (0, y1, 0) of `node`? The node's world matrix must be current.
+    const _partA = new THREE.Vector3(), _partB = new THREE.Vector3();
+    function partHit(node, y0, y1, radius, ax, ay, az, b) {
+      _partA.set(0, y0, 0).applyMatrix4(node.matrixWorld);
+      _partB.set(0, y1, 0).applyMatrix4(node.matrixWorld);
+      return segSegDistSq(ax, ay, az, b.x, b.y, b.z, _partA.x, _partA.y, _partA.z, _partB.x, _partB.y, _partB.z) <= radius * radius;
+    }
+
+    // How far a round advances this frame: during a freeze only rounds fired in it move (slowly)
+    function bulletStep(b, gdt, dt) { return freezeActive ? (b.freezeImmune ? dt * 0.12 : 0) : gdt; }
+
+    // === Bullet vs bullet ===
+    // Rounds from different shooters that meet in mid-air knock each other out: the player can
+    // shoot incoming fire down and enemies' crossing fire can clash. Tested on this frame's swept
+    // paths (sort and sweep along the wider axis), so fast rounds cannot slip through each other
+    // between frames. The player's own rounds never clash, nor do one enemy's (pellets, a burst).
+    const _clashLo = new Float32Array(MAX_BULLETS), _clashHi = new Float32Array(MAX_BULLETS), _clashStep = new Float32Array(MAX_BULLETS);
+    const _clashOrder = [];
+    const _clashByLo = (p, q) => _clashLo[p] - _clashLo[q];
+    const _clashPoint = new THREE.Vector3();
+    const _clashSparkCfg = {
+      colors: gpuFireColors, spdMin: 2, spdMax: 6.5, elevBias: 0.5, upBias: 0.6,
+      sizeMin: 3, sizeMax: 7, lifeMin: 0.12, lifeMax: 0.35, alpha: 1, gravity: 6, drag: 0.93, spread: 0.05
+    };
+
+    function clashBullets(gdt, dt) {
+      const n = bullets.length;
+      if (n < 2) return;
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const p = bullets[i].bPos;
+        if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+        if (p.z < minZ) minZ = p.z; if (p.z > maxZ) maxZ = p.z;
+      }
+      const alongX = maxX - minX >= maxZ - minZ;
+      _clashOrder.length = n;
+      for (let i = 0; i < n; i++) {
+        const b = bullets[i], s = bulletStep(b, gdt, dt);
+        const a0 = alongX ? b.bPos.x : b.bPos.z, a1 = a0 + (alongX ? b.vel.x : b.vel.z) * s;
+        _clashStep[i] = s;
+        _clashLo[i] = Math.min(a0, a1) - b.radius;
+        _clashHi[i] = Math.max(a0, a1) + b.radius;
+        _clashOrder[i] = i;
+      }
+      _clashOrder.sort(_clashByLo);
+
+      let clashes = 0;
+      for (let oi = 0; oi < n; oi++) {
+        const i = _clashOrder[oi], A = bullets[i];
+        if (A.dead) continue;
+        for (let oj = oi + 1; oj < n; oj++) {
+          const j = _clashOrder[oj];
+          if (_clashLo[j] > _clashHi[i]) break;
+          const B = bullets[j];
+          if (B.dead || (!A.enemy && !B.enemy) || (A.enemy && B.enemy && A.ownerEnemyId === B.ownerEnemyId)) continue;
+          // Closest approach while both move through this frame (u = 0..1 of the frame)
+          const sA = _clashStep[i], sB = _clashStep[j];
+          const rx = A.bPos.x - B.bPos.x, ry = A.bPos.y - B.bPos.y, rz = A.bPos.z - B.bPos.z;
+          const dx = A.vel.x * sA - B.vel.x * sB, dy = A.vel.y * sA - B.vel.y * sB, dz = A.vel.z * sA - B.vel.z * sB;
+          const dd = dx * dx + dy * dy + dz * dz;
+          const u = dd > 1e-12 ? THREE.MathUtils.clamp(-(rx * dx + ry * dy + rz * dz) / dd, 0, 1) : 0;
+          const qx = rx + dx * u, qy = ry + dy * u, qz = rz + dz * u;
+          // With a player round involved the full collision radii count (hitting a 3 cm bullet
+          // needs the help); two enemy rounds only clash on near-contact
+          const reach = (A.enemy && B.enemy ? 0.4 : 1) * (A.radius + B.radius);
+          if (qx * qx + qy * qy + qz * qz > reach * reach) continue;
+
+          _clashPoint.set(
+            A.bPos.x + B.bPos.x + (A.vel.x * sA + B.vel.x * sB) * u,
+            A.bPos.y + B.bPos.y + (A.vel.y * sA + B.vel.y * sB) * u,
+            A.bPos.z + B.bPos.z + (A.vel.z * sA + B.vel.z * sB) * u
+          ).multiplyScalar(0.5);
+          A.dead = B.dead = true;
+          emitGpu(_clashPoint, 8, _clashSparkCfg);
+          if (A.isRocket) detonateRocket(_clashPoint, A);
+          if (B.isRocket) detonateRocket(_clashPoint, B);
+          if (!A.enemy || !B.enemy) showHitMarker(false);
+          clashes++;
+          break; // A is gone
+        }
+      }
+      if (clashes) for (let i = bullets.length - 1; i >= 0; i--) if (bullets[i].dead) removeBulletAt(i);
+    }
+
     function updateBullets(gdt, dt) {
+      clashBullets(gdt, dt);
       for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
-        const bulletDt = freezeActive ? (b.freezeImmune ? dt * 0.12 : 0) : gdt;
+        const bulletDt = bulletStep(b, gdt, dt);
         if (bulletDt <= 0) continue;
 
         // Bullet life expiration
@@ -5841,11 +6282,13 @@
         // slow motion instead of collapsing into a stub.
         const segLen = Math.max(0.3, b.trailSpacing * 0.8);
         b.trailTimer += speedNow * bulletDt;
+        let shifted = false;
         if (b.trailTimer >= segLen) {
           let pushes = (b.trailTimer / segLen) | 0;
           b.trailTimer -= pushes * segLen;
           if (pushes > 4) pushes = 4;
           for (let k = 0; k < pushes; k++) sp.copyWithin(3, 0, sp.length - 3);
+          shifted = true;
         }
 
         const speedInv = 1 / Math.max(0.0001, speedNow);
@@ -5858,7 +6301,7 @@
         sp[1] = p.y - fy * headOffset;
         sp[2] = p.z - fz * headOffset;
 
-        if (p.distanceTo(camera.position) < 70) updateRibbonsFromSpine(sp, b.trail, 0.0125, 0.065);
+        if (p.distanceTo(camera.position) < 70) updateRibbonsFromSpine(sp, b.trail, 0.0125, 0.065, shifted);
         else collapseTrail(b.trail);
 
         const surfaceImpact = getArenaImpact(p);
@@ -5918,16 +6361,9 @@
         }
 
         if (!b.enemy) {
+          // This frame's path of the round
           const stepLen = speedNow * bulletDt;
-          const sweepNeeded = stepLen > 0.3;
-          let bdx = 0, bdy = 0, bdz = 0, prevX = p.x, prevY = p.y, prevZ = p.z;
-          if (sweepNeeded) {
-            const inv = 1 / Math.max(0.0001, speedNow);
-            bdx = b.vel.x * inv; bdy = b.vel.y * inv; bdz = b.vel.z * inv;
-            prevX = p.x - bdx * stepLen;
-            prevY = p.y - bdy * stepLen;
-            prevZ = p.z - bdz * stepLen;
-          }
+          const ax = p.x - b.vel.x * bulletDt, ay = p.y - b.vel.y * bulletDt, az = p.z - b.vel.z * bulletDt;
 
           for (let j = enemies.length - 1; j >= 0; j--) {
             const e = enemies[j];
@@ -5935,26 +6371,19 @@
 
             // Early bounding-sphere reject before expensive body-part checks
             const eqx = e.mesh.position.x - p.x, eqy = e.mesh.position.y + 1.0 - p.y, eqz = e.mesh.position.z - p.z;
-            const broadR = 3.0 + (sweepNeeded ? stepLen : 0);
+            const broadR = 3.0 + stepLen;
             if (eqx * eqx + eqy * eqy + eqz * eqz > broadR * broadR) continue;
-
-            let cpx = p.x, cpy = p.y, cpz = p.z;
-            if (sweepNeeded) {
-              const ecx = e.mesh.position.x, ecy = e.mesh.position.y + 1.0, ecz = e.mesh.position.z;
-              const along = (ecx - prevX) * bdx + (ecy - prevY) * bdy + (ecz - prevZ) * bdz;
-              const t = Math.max(0, Math.min(stepLen, along));
-              cpx = prevX + bdx * t;
-              cpy = prevY + bdy * t;
-              cpz = prevZ + bdz * t;
-            }
 
             // Rocket: simple bounding sphere, no body-part detection needed
             if (b.isRocket) {
-              const rex = e.mesh.position.x - cpx, rey = e.mesh.position.y + 1.28 - cpy, rez = e.mesh.position.z - cpz;
+              const ex = e.mesh.position.x, ey = e.mesh.position.y + 1.28, ez = e.mesh.position.z;
               const rhr = b.radius + e.radius + 0.5;
-              if (rex * rex + rey * rey + rez * rez < rhr * rhr) {
-                e.hp = 0;
-                killEnemy(j, !b.enemy);
+              if (segSegDistSq(ax, ay, az, p.x, p.y, p.z, ex, ey, ez, ex, ey, ez) < rhr * rhr) {
+                // A direct hit kills a soldier outright; the boss only takes the blast damage
+                if (!e.isBoss) {
+                  e.hp = 0;
+                  killEnemy(j, !b.enemy);
+                }
                 detonateRocket(p, b);
                 removeBulletAt(i);
                 removed = true;
@@ -5963,55 +6392,24 @@
               continue;
             }
 
-            // Body-part hit detection with short-circuit (head > torso > arms > legs)
+            // Body parts as drawn (they scale with the rig): head sphere, torso capsule,
+            // arm and leg capsules, swept along this frame's path. Head > torso > arms > legs.
+            e.mesh.updateMatrix(); // a sleeping rig's matrix is not kept current
+            e.mesh.updateMatrixWorld(true);
+            const k = e.mesh.scale.x, br = b.radius;
             let dmgMult = 0;
             let hitColor = 0xff8b8b;
             let hitIntensity = 0.8;
 
-            e.head.getWorldPosition(tempVec1);
-            let dx = cpx - tempVec1.x, dy = cpy - tempVec1.y, dz = cpz - tempVec1.z;
-            let hr = 0.36 + b.radius;
-            if (dx * dx + dy * dy + dz * dz <= hr * hr) {
+            if (partHit(e.mesh, 2.28, 2.28, (e.isBoss ? 0.37 : 0.26) * k + br, ax, ay, az, p)) {
               dmgMult = 3; hitColor = 0xffcb6b; hitIntensity = 1.45;
-            }
-
-            if (!dmgMult) {
-              e.torso.getWorldPosition(tempVec1);
-              dx = cpx - tempVec1.x; dy = cpy - tempVec1.y; dz = cpz - tempVec1.z;
-              hr = 0.52 + b.radius;
-              if (dx * dx + dy * dy + dz * dz <= hr * hr) dmgMult = 1;
-            }
-
-            if (!dmgMult) {
-              hr = 0.35 + b.radius;
-              const hrSq = hr * hr;
-              e.rightArm.getWorldPosition(tempVec1);
-              dx = cpx - tempVec1.x; dy = cpy - tempVec1.y; dz = cpz - tempVec1.z;
-              if (dx * dx + dy * dy + dz * dz <= hrSq) {
-                dmgMult = 0.6; hitColor = 0xffaa77; hitIntensity = 0.6;
-              } else {
-                e.leftArm.getWorldPosition(tempVec1);
-                dx = cpx - tempVec1.x; dy = cpy - tempVec1.y; dz = cpz - tempVec1.z;
-                if (dx * dx + dy * dy + dz * dz <= hrSq) {
-                  dmgMult = 0.6; hitColor = 0xffaa77; hitIntensity = 0.6;
-                }
-              }
-            }
-
-            if (!dmgMult) {
-              hr = 0.35 + b.radius;
-              const hrSq = hr * hr;
-              e.rightLeg.getWorldPosition(tempVec1);
-              dx = cpx - tempVec1.x; dy = cpy - tempVec1.y; dz = cpz - tempVec1.z;
-              if (dx * dx + dy * dy + dz * dz <= hrSq) {
-                dmgMult = 0.4; hitColor = 0xff9966; hitIntensity = 0.5;
-              } else {
-                e.leftLeg.getWorldPosition(tempVec1);
-                dx = cpx - tempVec1.x; dy = cpy - tempVec1.y; dz = cpz - tempVec1.z;
-                if (dx * dx + dy * dy + dz * dz <= hrSq) {
-                  dmgMult = 0.4; hitColor = 0xff9966; hitIntensity = 0.5;
-                }
-              }
+            } else if (partHit(e.mesh, 1.0, 1.62, 0.34 * k + br, ax, ay, az, p)) {
+              dmgMult = 1;
+            } else if (partHit(e.rightArm, 0, -0.55, 0.12 * k + br, ax, ay, az, p) || partHit(e.rightFore, 0, -0.6, 0.11 * k + br, ax, ay, az, p) ||
+                       partHit(e.leftArm, 0, -0.55, 0.12 * k + br, ax, ay, az, p) || partHit(e.leftFore, 0, -0.6, 0.11 * k + br, ax, ay, az, p)) {
+              dmgMult = 0.6; hitColor = 0xffaa77; hitIntensity = 0.6;
+            } else if (partHit(e.rightLeg, -0.02, -1.18, 0.14 * k + br, ax, ay, az, p) || partHit(e.leftLeg, -0.02, -1.18, 0.14 * k + br, ax, ay, az, p)) {
+              dmgMult = 0.4; hitColor = 0xff9966; hitIntensity = 0.5;
             }
 
             if (!dmgMult) continue;
@@ -6025,7 +6423,9 @@
             showHitMarker(false); // upgraded to kill-red by killEnemy if the hit is lethal
 
             const isSniper = b.weapon && b.weapon.id === "sniper";
-            const isHeadshot = dmgMult >= 3;
+            // A full-calibre round to the head kills; one shotgun pellet only deals its
+            // tripled share, so pellets add up instead of one-shotting
+            const isHeadshot = dmgMult >= 3 && !b.weapon.pellets;
 
             if (e.isBoss) {
               // Boss: no instant kill, use actual damage × multiplier
@@ -6083,7 +6483,7 @@
               destroyObstacle(oi, b.vel, obstacleImpact.point);
             }
           } else {
-            addBulletHole(obstacleImpact.point, obstacleImpact.normal, speedNow, p.distanceTo(b.start));
+            addBulletHole(obstacleImpact.point, obstacleImpact.normal, speedNow, p.distanceTo(b.start), obstacles[obstacleImpact.obsIndex]);
             const oi = obstacleImpact.obsIndex;
             if (oi >= 0 && oi < obstacles.length) {
               const obs = obstacles[oi];
@@ -6107,7 +6507,8 @@
     // === Far-enemy LOD ===
     // Past ENEMY_LOD_DIST an enemy is ~15px tall, so its ~21-draw-call rig is
     // swapped for one slot of a single instanced billboard (1 draw call for all).
-    // Hit detection keeps using the hidden rig, whose matrices still update.
+    // The hidden rig also leaves the renderer's per-frame matrix walk (it was two thirds of all nodes
+    // visited): hit tests and muzzle lookups refresh its matrices on demand.
     const ENEMY_LOD_DIST = 90;
     const LOD_SCALE = new THREE.Vector3(1, 1, 1);
     const lodGeo = new THREE.PlaneGeometry(0.9, 1.95);
@@ -6123,6 +6524,9 @@
       const t = new THREE.CanvasTexture(c); t.minFilter = THREE.LinearFilter; return t;
     })(), alphaTest: 0.5, side: THREE.DoubleSide });
     const lodMesh = new THREE.InstancedMesh(lodGeo, lodMat, ROUND_ENEMY_COUNT + 1);
+    // instanceColor from the start: created by the first setColorAt it changed the shader, which then
+    // compiled on the first frame of play
+    lodMesh.setColorAt(0, new THREE.Color());
     lodMesh.count = 0;
     lodMesh.frustumCulled = false;
     scene.add(lodMesh);
@@ -6138,6 +6542,7 @@
         const asleep = d2 > ENEMY_SLEEP_DIST * ENEMY_SLEEP_DIST;
         const lod = !asleep && !e.isBoss && d2 > ENEMY_LOD_DIST * ENEMY_LOD_DIST;
         e.mesh.visible = !asleep && !lod;
+        if (lod) e.mesh.matrixWorldAutoUpdate = false;
         if (!lod) continue;
         instTempQuat.setFromAxisAngle(UP_AXIS, Math.atan2(dx, dz));
         instTempPos.set(p.x, 0.02, p.z);
@@ -6147,6 +6552,7 @@
         n++;
       }
       lodMesh.count = n;
+      lodMesh.visible = n > 0;
       if (n > 0) { lodMesh.instanceMatrix.needsUpdate = true; lodMesh.instanceColor.needsUpdate = true; }
     }
 
@@ -6191,47 +6597,64 @@
           const along = tempVec1.dot(tempVec3);
           if (along < 1 || along > ENEMY_SLEEP_DIST) continue;
           const r = e.isBoss ? 1.0 : 0.7;
-          if (tempVec1.lengthSq() - along * along < r * r) onTarget = true;
+          if (tempVec1.lengthSq() - along * along < r * r) {
+            // ...and not behind cover
+            const c = camera.position;
+            onTarget = segmentObstacleT(c.x, c.y, c.z, c.x + tempVec3.x * along, c.y + tempVec3.y * along, c.z + tempVec3.z * along) === Infinity;
+          }
         }
       }
       if (onTarget !== _lastOnTarget) { _lastOnTarget = onTarget; crosshairEl.classList.toggle("target", onTarget); }
     }
 
     const clock = new THREE.Clock();
-    let _fpsTime = 0, _fpsFrames = 0, _fpsGoodStreak = 0;
+    let _fpsTime = 0, _fpsFrames = 0, _fpsGoodStreak = 0, _fpsBadStreak = 0;
+    let _pausedFrameDrawn = false;
 
     function animate() {
       requestAnimationFrame(animate);
       const dt = Math.min(0.05, clock.getDelta());
 
-      // Adaptive resolution: step down fast on sustained missed frames,
+      // Adaptive resolution: step down on sustained missed frames,
       // recover slowly (small steps, several clean seconds required).
+      // Every step re-allocates all render targets (a 55-100 ms stall), so one slow second (a GC, a
+      // burst of explosions) no longer triggers it, and stepping up needs 10 clean seconds, not 5.
       if (!paused && !gameOver) {
         _fpsTime += dt; _fpsFrames++;
         if (_fpsTime >= 1) {
           const avgFrame = _fpsTime / _fpsFrames;
           fpsEl.textContent = `${Math.round(1 / avgFrame)} · ${Math.round(renderScale * 100)}%`;
           if (avgFrame > 1 / 48 && renderScale > MIN_RENDER_SCALE) {
-            renderScale = Math.max(MIN_RENDER_SCALE, renderScale - 0.1);
             _fpsGoodStreak = 0;
-            applyRenderSize();
+            if (++_fpsBadStreak >= 2) {
+              _fpsBadStreak = 0;
+              renderScale = Math.max(MIN_RENDER_SCALE, renderScale - 0.1);
+              applyRenderSize();
+            }
           } else if (avgFrame < 1 / 59 && renderScale < 1) {
-            if (++_fpsGoodStreak >= 5) {
+            _fpsBadStreak = 0;
+            if (++_fpsGoodStreak >= 10) {
               _fpsGoodStreak = 0;
               renderScale = Math.min(1, renderScale + 0.05);
               applyRenderSize();
             }
           } else {
-            _fpsGoodStreak = 0;
+            _fpsGoodStreak = 0; _fpsBadStreak = 0;
           }
           _fpsTime = 0; _fpsFrames = 0;
         }
       }
 
+      // The frozen frame behind the pause/start card is drawn once, not 60 times a second
       if (paused) {
-        composer.render();
+        if (!_pausedFrameDrawn) {
+          gradePass.uniforms.uPulse.value = 0; // no ripple frozen behind the pause card
+          composer.render();
+          _pausedFrameDrawn = true;
+        }
         return;
       }
+      _pausedFrameDrawn = false;
 
       if (!gameOver) {
         if (freezeActive) {
@@ -6246,7 +6669,6 @@
         if (worldDt > 0) updateEnemies(worldDt);
         updateBullets(gdt, dt);
         updateBulletInstances();
-        // checkBulletBulletCollisions();
 
         playTime += dt;
 
@@ -6264,13 +6686,12 @@
       // World effects run on scaled time so smoke, sparks, shells and explosions
       // all hang in the air together with the bullets during bullet time.
       const worldFxDt = freezeActive ? 0 : (gameOver ? dt : dt * timeScale);
-      updateImpactEffects(worldFxDt);
       updateDissolveEffects(worldFxDt);
       updateMuzzleEffects(worldFxDt);
-      updateBulletCollisionEffects(worldFxDt);
       updateExplosionEffects(worldFxDt);
       updateGpuParticles(worldFxDt);
       updateSmokeParticles(worldFxDt);
+      updateDust(worldFxDt);
       updateFragments(worldFxDt);
       updateShells(worldFxDt);
       updateDroppedWeapons(worldFxDt);
@@ -6307,8 +6728,12 @@
         }
       }
 
-      // Center-screen freeze-ready banner
-      const freezeReady = !gameOver && freezeCharge > 0 && !freezeActive;
+      // Center-screen freeze-ready banner: a few seconds after each new charge, then the
+      // HUD line alone (it used to pulse for as long as a charge was saved up)
+      if (freezeCharge > _bannerCharge) _freezeBannerTimer = 4;
+      _bannerCharge = freezeCharge;
+      _freezeBannerTimer = Math.max(0, _freezeBannerTimer - dt);
+      const freezeReady = !gameOver && freezeCharge > 0 && !freezeActive && _freezeBannerTimer > 0;
       if (freezeReady !== _lastFreezeReady) {
         _lastFreezeReady = freezeReady;
         freezeBannerEl.style.display = freezeReady ? "block" : "none";
@@ -6337,9 +6762,15 @@
       _gradeFreeze += ((freezeActive ? 1 : 0) - _gradeFreeze) * Math.min(1, dt * 6);
       gradePass.uniforms.uSlow.value = _gradeSlow;
       gradePass.uniforms.uFreeze.value = _gradeFreeze;
+      // Time ripple when a freeze starts
+      if (freezeActive && !_prevFreeze) _pulse = 0.0001;
+      _prevFreeze = freezeActive;
+      if (_pulse > 0) { _pulse += dt / 0.5; if (_pulse >= 1) _pulse = 0; }
+      gradePass.uniforms.uPulse.value = _pulse;
       setAudioTimeScale(freezeActive ? 0 : timeScale);
 
-      if (muzzleLight.intensity > 0.02) muzzleLight.intensity *= Math.exp(-26 * dt);
+      // The flash's light lives on world time like the flash itself (it used to vanish at once in slow motion)
+      if (muzzleLight.intensity > 0.02) muzzleLight.intensity *= Math.exp(-26 * worldFxDt);
       else muzzleLight.intensity = 0;
       updateViewModel(dt);
 
@@ -6373,9 +6804,11 @@
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       applyRenderSize();
+      _pausedFrameDrawn = false; // resizing clears the canvas: redraw the frozen frame
     });
 
     resetGame();
+    warmUpShaders();
     animate();
   </script>
 </body>
